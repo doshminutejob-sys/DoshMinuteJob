@@ -80,7 +80,7 @@ function remainingTime(claim, hours) {
   const left = ms - (Date.now() - claimed);
   const h = Math.floor(left / 3600000);
   const m = Math.floor((left % 3600000) / 60000);
-  return `${h}ঘ ${m}মি`;
+  return h + "ঘ " + m + "মি";
 }
 
 async function loadTasks() {
@@ -89,20 +89,21 @@ async function loadTasks() {
 
   await loadClaims();
 
-  // Load all task collections
-  const [permSnap, coolSnap, tempSnap] = await Promise.all([
+  const [permSnap, coolSnap, tempSnap, listsSnap] = await Promise.all([
     getDocs(collection(db, "tasks_permanent")),
     getDocs(collection(db, "tasks_cooldown")),
-    getDocs(collection(db, "tasks_temporary"))
+    getDocs(collection(db, "tasks_temporary")),
+    getDocs(collection(db, "task_lists"))
   ]);
 
   let permanentHtml = "";
   let cooldownHtml = "";
   let temporaryHtml = "";
+  let sequentialHtml = "";
 
   const now = Date.now();
 
-  // ===== Permanent Tasks =====
+  // ===== A. Permanent =====
   permSnap.forEach(d => {
     const t = d.data();
     if (t.status !== "published") return;
@@ -115,13 +116,13 @@ async function loadTasks() {
     } else if (claimed) {
       action = `<button class="btn" disabled style="opacity:0.6">✅ সম্পন্ন হয়েছে</button>`;
     } else {
-      action = renderActionButtons(d.id, t);
+      action = renderActionButtons(d.id, t, "permanent");
     }
 
     permanentHtml += taskCard(t, action, "একবারের টাস্ক");
   });
 
-  // ===== Independent Cooldown Tasks =====
+  // ===== B. Independent Cooldown =====
   coolSnap.forEach(d => {
     const t = d.data();
     if (t.status !== "published") return;
@@ -135,18 +136,17 @@ async function loadTasks() {
     } else if (claimed && isInCooldown(claimed, cd)) {
       action = `<button class="btn" disabled style="opacity:0.6">⏳ ${remainingTime(claimed, cd)}</button>`;
     } else {
-      action = renderActionButtons(d.id, t);
+      action = renderActionButtons(d.id, t, "cooldown");
     }
 
-    cooldownHtml += taskCard(t, action, `কুলডাউন ${cd} ঘণ্টা`);
+    cooldownHtml += taskCard(t, action, "কুলডাউন " + cd + " ঘণ্টা");
   });
 
-  // ===== Temporary Tasks =====
+  // ===== D. Temporary =====
   tempSnap.forEach(d => {
     const t = d.data();
     if (t.status !== "published") return;
 
-    // Check expiry
     if (t.activeDays && t.createdAt?.toDate) {
       const expire = t.createdAt.toDate().getTime() + (t.activeDays * 86400000);
       if (now > expire) return;
@@ -161,11 +161,100 @@ async function loadTasks() {
     } else if (claimed && isInCooldown(claimed, cd)) {
       action = `<button class="btn" disabled style="opacity:0.6">⏳ ${remainingTime(claimed, cd)}</button>`;
     } else {
-      action = renderActionButtons(d.id, t);
+      action = renderActionButtons(d.id, t, "temporary");
     }
 
-    temporaryHtml += taskCard(t, action, `মেয়াদ ${t.activeDays || "∞"} দিন`);
+    temporaryHtml += taskCard(t, action, "মেয়াদ " + (t.activeDays || "∞") + " দিন");
   });
+
+  // ===== C. Sequential Lists =====
+  for (const listDoc of listsSnap.docs) {
+    const list = listDoc.data();
+    if (list.status !== "published") continue;
+
+    // Get all tasks of this list ordered
+    const tasksQ = query(
+      collection(db, "task_list_tasks"),
+      where("listId", "==", listDoc.id)
+    );
+    const tasksSnap = await getDocs(tasksQ);
+    const listTasks = [];
+    tasksSnap.forEach(t => listTasks.push({ id: t.id, ...t.data() }));
+    listTasks.sort((a, b) => (a.order || 0) - (b.order || 0));
+
+    if (listTasks.length === 0) continue;
+
+    // Find which task the user should see next
+    // Logic: Find the first task that is either never claimed or cooldown expired
+    let currentTask = null;
+    let currentIndex = 0;
+
+    for (let i = 0; i < listTasks.length; i++) {
+      const t = listTasks[i];
+      const claim = userClaims[t.id];
+      const cd = list.cooldownHours || 0;
+
+      if (!claim) {
+        currentTask = t;
+        currentIndex = i;
+        break;
+      }
+
+      if (cd > 0 && !isInCooldown(claim, cd)) {
+        // Cooldown finished → cycle back or continue
+        // For sequential: after finishing all, start from beginning after cooldown of last task
+        currentTask = t;
+        currentIndex = i;
+        break;
+      }
+    }
+
+    // If all tasks are in cooldown, show the one with earliest remaining time
+    if (!currentTask) {
+      // Find the claim that will expire soonest
+      let soonest = null;
+      let soonestTask = null;
+      listTasks.forEach(t => {
+        const claim = userClaims[t.id];
+        if (claim && claim.claimedAt) {
+          const expireAt = claim.claimedAt.toDate().getTime() + ((list.cooldownHours || 0) * 3600000);
+          if (!soonest || expireAt < soonest) {
+            soonest = expireAt;
+            soonestTask = t;
+          }
+        }
+      });
+      currentTask = soonestTask || listTasks[0];
+    }
+
+    if (!currentTask) continue;
+
+    const claim = userClaims[currentTask.id];
+    const cd = list.cooldownHours || 0;
+    let action = "";
+
+    if (userData.status !== "Active") {
+      action = `<button class="btn" disabled style="opacity:0.5">আগে অ্যাকাউন্ট এক্টিভ করুন</button>`;
+    } else if (claim && isInCooldown(claim, cd)) {
+      action = `<button class="btn" disabled style="opacity:0.6">⏳ ${remainingTime(claim, cd)}</button>`;
+    } else {
+      action = renderActionButtons(currentTask.id, currentTask, "sequential");
+    }
+
+    sequentialHtml += `
+      <div class="card" style="margin-bottom:12px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+          📜 লিস্ট: <b>${list.name}</b> • টাস্ক \( {currentIndex + 1}/ \){listTasks.length}
+        </div>
+        <div style="font-weight:700;font-size:15px;margin-bottom:6px;">${currentTask.name}</div>
+        <div style="font-size:14px;margin-bottom:6px;">💰 <b style="color:var(--green)">${currentTask.coin}</b> কয়েন</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">
+          কুলডাউন: ${cd} ঘণ্টা
+        </div>
+        ${action}
+      </div>
+    `;
+  }
 
   // Render page
   document.getElementById("app").innerHTML = `
@@ -184,19 +273,16 @@ async function loadTasks() {
       ` : ""}
 
       <div class="section-title">⭐ একবারের টাস্ক (Permanent)</div>
-      <div id="permanentList">
-        ${permanentHtml || emptyCard("কোনো পার্মানেন্ট টাস্ক নেই")}
-      </div>
+      <div>${permanentHtml || emptyCard("কোনো পার্মানেন্ট টাস্ক নেই")}</div>
 
       <div class="section-title">🔄 কুলডাউন টাস্ক</div>
-      <div id="cooldownList">
-        ${cooldownHtml || emptyCard("কোনো কুলডাউন টাস্ক নেই")}
-      </div>
+      <div>${cooldownHtml || emptyCard("কোনো কুলডাউন টাস্ক নেই")}</div>
+
+      <div class="section-title">📜 সিকোয়েন্সিয়াল লিস্ট</div>
+      <div>${sequentialHtml || emptyCard("কোনো সিকোয়েন্সিয়াল লিস্ট নেই")}</div>
 
       <div class="section-title">⏳ সাময়িক টাস্ক</div>
-      <div id="temporaryList">
-        ${temporaryHtml || emptyCard("কোনো সাময়িক টাস্ক নেই")}
-      </div>
+      <div>${temporaryHtml || emptyCard("কোনো সাময়িক টাস্ক নেই")}</div>
     </div>
   `;
 }
@@ -221,12 +307,12 @@ function emptyCard(msg) {
   return `<div class="card" style="text-align:center;color:var(--muted);font-size:13px;">${msg}</div>`;
 }
 
-function renderActionButtons(taskId, t) {
+function renderActionButtons(taskId, t, category) {
   if (t.code && t.code.trim()) {
     return `
       <button class="btn" onclick="window.openLink('${t.link}')">টাস্ক ওপেন করুন</button>
       <input type="text" id="code-${taskId}" placeholder="ভেরিফিকেশন কোড লিখুন" style="margin-top:10px;">
-      <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', \( {t.coin}, ' \){t.code}', '${t.category || "cooldown"}')">
+      <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', \( {t.coin}, ' \){t.code}', '${category}')">
         কোড সাবমিট ও ক্লেম
       </button>
     `;
@@ -236,7 +322,7 @@ function renderActionButtons(taskId, t) {
   return `
     <button class="btn" onclick="window.openLink('${t.link}')">টাস্ক ওপেন করুন</button>
     <button class="btn" id="claim-${taskId}" style="margin-top:8px;"
-      onclick="window.startTimer('${taskId}', ${t.coin}, \( {timer}, ' \){t.category || "cooldown"}')">
+      onclick="window.startTimer('${taskId}', ${t.coin}, \( {timer}, ' \){category}')">
       টাইমার শুরু করুন (${timer}s)
     </button>
   `;
@@ -252,23 +338,23 @@ window.startTimer = function(taskId, coin, seconds, category) {
     return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
   }
 
-  const btn = document.getElementById(`claim-${taskId}`);
+  const btn = document.getElementById("claim-" + taskId);
   if (!btn || btn.disabled) return;
 
   btn.disabled = true;
   let left = seconds;
-  btn.innerText = `অপেক্ষা করুন ${left}s...`;
+  btn.innerText = "অপেক্ষা করুন " + left + "s...";
 
   const interval = setInterval(() => {
     left--;
-    btn.innerText = `অপেক্ষা করুন ${left}s...`;
+    btn.innerText = "অপেক্ষা করুন " + left + "s...";
     if (left <= 0) clearInterval(interval);
   }, 1000);
 
   setTimeout(async () => {
     try {
       await claimTask(taskId, coin, category);
-      tg.showAlert(`✅ ${coin} কয়েন যোগ হয়েছে!`);
+      tg.showAlert("✅ " + coin + " কয়েন যোগ হয়েছে!");
       loadTasks();
     } catch (e) {
       tg.showAlert("সমস্যা: " + e.message);
@@ -283,7 +369,7 @@ window.submitCode = async function(taskId, coin, correctCode, category) {
     return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
   }
 
-  const input = document.getElementById(`code-${taskId}`);
+  const input = document.getElementById("code-" + taskId);
   const code = (input?.value || "").trim();
 
   if (!code) return tg.showAlert("কোড লিখুন");
@@ -291,7 +377,7 @@ window.submitCode = async function(taskId, coin, correctCode, category) {
 
   try {
     await claimTask(taskId, coin, category);
-    tg.showAlert(`✅ ${coin} কয়েন যোগ হয়েছে!`);
+    tg.showAlert("✅ " + coin + " কয়েন যোগ হয়েছে!");
     loadTasks();
   } catch (e) {
     tg.showAlert("সমস্যা: " + e.message);
@@ -299,7 +385,7 @@ window.submitCode = async function(taskId, coin, correctCode, category) {
 };
 
 async function claimTask(taskId, coin, category) {
-  // Save claim
+  // 1. Save claim
   await addDoc(collection(db, "task_claims"), {
     userId: String(user.id),
     taskId,
@@ -308,28 +394,35 @@ async function claimTask(taskId, coin, category) {
     claimedAt: serverTimestamp()
   });
 
-  // Add coin to user
+  // 2. Add coin to user
   await updateDoc(doc(db, "users", String(user.id)), {
     coin: increment(coin),
     totalEarned: increment(coin),
     lastActiveAt: serverTimestamp()
   });
 
-  // Update task completed count
-  const collectionName = {
-    permanent: "tasks_permanent",
-    cooldown: "tasks_cooldown",
-    temporary: "tasks_temporary"
-  }[category] || "tasks_cooldown";
+  // 3. Update completed count (for non-sequential)
+  if (category !== "sequential") {
+    const collectionName = {
+      permanent: "tasks_permanent",
+      cooldown: "tasks_cooldown",
+      temporary: "tasks_temporary"
+    }[category];
 
-  try {
-    await updateDoc(doc(db, collectionName, taskId), {
-      completedCount: increment(1)
-    });
-  } catch (e) {}
+    if (collectionName) {
+      try {
+        await updateDoc(doc(db, collectionName, taskId), {
+          completedCount: increment(1)
+        });
+      } catch (e) {}
+    }
+  }
 
-  // Activate referral if pending
+  // 4. Activate referral if pending + give reward
   await activateReferral();
+
+  // 5. Give 5% bonus to referrer
+  await giveReferralBonus(coin);
 }
 
 async function activateReferral() {
@@ -347,7 +440,6 @@ async function activateReferral() {
       activatedAt: serverTimestamp()
     });
 
-    // Give reward to referrer
     const settingsSnap = await getDoc(doc(db, "system_settings", "main"));
     const reward = settingsSnap.exists() ? (settingsSnap.data().activeReferralReward || 250) : 250;
 
@@ -365,7 +457,38 @@ async function activateReferral() {
   }
 }
 
-// Extra CSS for section title
+// ===== 5% Referral Bonus =====
+async function giveReferralBonus(earnedCoin) {
+  // Find who referred this user
+  const q = query(
+    collection(db, "referral_history"),
+    where("newUserId", "==", String(user.id)),
+    where("status", "==", "active")
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return;
+
+  const settingsSnap = await getDoc(doc(db, "system_settings", "main"));
+  const percent = settingsSnap.exists() ? (settingsSnap.data().referralBonusPercent || 5) : 5;
+  const bonus = Math.floor(earnedCoin * (percent / 100));
+
+  if (bonus <= 0) return;
+
+  for (const d of snap.docs) {
+    const ref = d.data();
+    const referrerRef = doc(db, "users", ref.referrerId);
+    const referrerSnap = await getDoc(referrerRef);
+    if (referrerSnap.exists()) {
+      await updateDoc(referrerRef, {
+        coin: increment(bonus),
+        totalEarned: increment(bonus),
+        referralIncome: increment(bonus)
+      });
+    }
+  }
+}
+
+// Extra CSS
 const style = document.createElement("style");
 style.textContent = `
   .section-title{
