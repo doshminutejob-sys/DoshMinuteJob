@@ -49,8 +49,8 @@ async function loadRefer() {
 
   await updateDoc(userRef, { lastActiveAt: serverTimestamp() });
 
-  // Referral link (Mini App)
-  const referralLink = `https://t.me/\( {BOT_USERNAME}?startapp= \){user.id}`;
+  // সঠিক রেফার লিংক
+  const referralLink = "https://t.me/" + BOT_USERNAME + "?startapp=" + user.id;
 
   // Load referral history
   const q = query(
@@ -94,7 +94,6 @@ async function loadRefer() {
     `;
   }
 
-  // Settings for reward info
   let rewardText = "250";
   try {
     const sSnap = await getDoc(doc(db, "system_settings", "main"));
@@ -158,7 +157,6 @@ async function loadRefer() {
     </div>
   `;
 
-  // Copy button
   document.getElementById("copyBtn").onclick = () => {
     const link = document.getElementById("refLink").value;
     if (navigator.clipboard) {
@@ -173,14 +171,13 @@ async function loadRefer() {
     }
   };
 
-  // Share button
   document.getElementById("shareBtn").onclick = () => {
     const link = document.getElementById("refLink").value;
-    const text = `দশ মিনিটের জব-এ জয়েন করুন এবং টাস্ক করে কয়েন আয় করুন!\n\n${link}`;
+    const text = "দশ মিনিটের জব-এ জয়েন করুন এবং টাস্ক করে কয়েন আয় করুন!\n\n" + link;
     if (tg.openTelegramLink) {
-      tg.openTelegramLink(`https://t.me/share/url?url=\( {encodeURIComponent(link)}&text= \){encodeURIComponent(text)}`);
+      tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text));
     } else {
-      window.open(`https://t.me/share/url?url=\( {encodeURIComponent(link)}&text= \){encodeURIComponent(text)}`, "_blank");
+      window.open("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent(text), "_blank");
     }
   };
 }
