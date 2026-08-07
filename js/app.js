@@ -92,7 +92,6 @@ async function createOrUpdateUser() {
       lastActiveAt: serverTimestamp()
     });
 
-    // Referral tracking
     if (startParam && startParam !== String(user.id)) {
       await addDoc(collection(db, "referral_history"), {
         referrerId: String(startParam),
@@ -132,11 +131,12 @@ async function loadHome() {
 
   const data = snap.data();
 
-  const statusClass = data.status === "Active" ? "status-active" : "status-inactive";
-  const statusText = data.status === "Active" ? "Active" : "Inactive";
+  const isActive = data.status === "Active";
+  const statusClass = isActive ? "status-active" : "status-inactive";
+  const statusText = isActive ? "Active" : "Inactive";
 
   let activationCard = "";
-  if (data.status !== "Active") {
+  if (!isActive) {
     activationCard = `
       <div class="card warning-card">
         <div class="card-title">⚠️ অ্যাকাউন্ট এক্টিভ নয়</div>
@@ -155,6 +155,14 @@ async function loadHome() {
       </div>
     `;
   }
+
+  // Admin হলে নেভে অতিরিক্ত বাটন দেখাবে
+  const adminNav = data.role === "admin" ? `
+    <a href="admin/index.html" class="nav-item">
+      <span class="icon">🛠</span>
+      <span class="label">অ্যাডমিন</span>
+    </a>
+  ` : "";
 
   document.getElementById("app").innerHTML = `
     <div class="page">
@@ -203,6 +211,18 @@ async function loadHome() {
       </div>
     </div>
   `;
+
+  // Admin হলে নিচের নেভে অতিরিক্ত অপশন যোগ করা
+  if (data.role === "admin") {
+    const nav = document.querySelector(".bottom-nav");
+    if (nav && !nav.querySelector('a[href="admin/index.html"]')) {
+      const adminLink = document.createElement("a");
+      adminLink.href = "admin/index.html";
+      adminLink.className = "nav-item";
+      adminLink.innerHTML = `<span class="icon">🛠</span><span class="label">অ্যাডমিন</span>`;
+      nav.appendChild(adminLink);
+    }
+  }
 }
 
 (async () => {
