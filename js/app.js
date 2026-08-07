@@ -156,14 +156,6 @@ async function loadHome() {
     `;
   }
 
-  // Admin হলে নেভে অতিরিক্ত বাটন দেখাবে
-  const adminNav = data.role === "admin" ? `
-    <a href="admin/index.html" class="nav-item">
-      <span class="icon">🛠</span>
-      <span class="label">অ্যাডমিন</span>
-    </a>
-  ` : "";
-
   document.getElementById("app").innerHTML = `
     <div class="page">
       <div class="hero">
@@ -203,6 +195,17 @@ async function loadHome() {
       ${activationCard}
       ${adminCard}
 
+      <!-- Official Channel -->
+      <div class="card" style="text-align:center;">
+        <div class="card-title">📢 অফিসিয়াল চ্যানেল</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">
+          আপডেট ও নোটিফিকেশন পেতে চ্যানেলে জয়েন করুন
+        </p>
+        <a href="https://t.me/Dosh_Minute_Job_Official" target="_blank" class="btn" style="display:block;text-decoration:none;">
+          চ্যানেলে জয়েন করুন
+        </a>
+      </div>
+
       <div class="quick-grid">
         <a href="tasks.html" class="quick-btn">📋<br>টাস্ক</a>
         <a href="refer.html" class="quick-btn">👥<br>রেফার</a>
@@ -212,7 +215,7 @@ async function loadHome() {
     </div>
   `;
 
-  // Admin হলে নিচের নেভে অতিরিক্ত অপশন যোগ করা
+  // Admin হলে নিচের নেভে অতিরিক্ত অপশন
   if (data.role === "admin") {
     const nav = document.querySelector(".bottom-nav");
     if (nav && !nav.querySelector('a[href="admin/index.html"]')) {
