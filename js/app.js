@@ -6,7 +6,10 @@ import {
   updateDoc,
   serverTimestamp,
   collection,
-  addDoc
+  addDoc,
+  query,
+  where,
+  getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const tg = window.Telegram?.WebApp;
@@ -28,7 +31,18 @@ tg.setHeaderColor("#0B1220");
 tg.setBackgroundColor("#0B1220");
 
 const user = tg.initDataUnsafe.user;
-const startParam = tg.initDataUnsafe.start_param || null;
+
+// ===== Get start_param (Referral) =====
+function getStartParam() {
+  let param = tg.initDataUnsafe?.start_param || null;
+  if (!param) {
+    const urlParams = new URLSearchParams(window.location.search);
+    param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || null;
+  }
+  return param ? String(param) : null;
+}
+
+const startParam = getStartParam();
 
 function generateDeviceHash() {
   const str = [
@@ -47,9 +61,7 @@ function generateDeviceHash() {
   return "dh_" + Math.abs(hash).toString(36);
 }
 
-// ===== Improved Location Detection with Fallback =====
 async function detectLocation() {
-  // Try 1: ipapi.co
   try {
     const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
     if (res.ok) {
@@ -65,28 +77,11 @@ async function detectLocation() {
     }
   } catch (e) {}
 
-  // Try 2: ipwho.is
   try {
     const res = await fetch("https://ipwho.is/", { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.ip) {
-        return {
-          ip: data.ip,
-          country: data.country || "Unknown",
-          countryCode: data.country_code || "",
-          city: data.city || ""
-        };
-      }
-    }
-  } catch (e) {}
-
-  // Try 3: geojs.io
-  try {
-    const res = await fetch("https://get.geojs.io/v1/ip/geo.json", { cache: "no-store" });
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ip) {
         return {
           ip: data.ip,
           country: data.country || "Unknown",
@@ -149,13 +144,56 @@ async function ensureSettings() {
   }
 }
 
+async function createReferralRecord(newUserId) {
+  if (!startParam || startParam === String(newUserId)) return;
+
+  try {
+    const q = query(
+      collection(db, "referral_history"),
+      where("newUserId", "==", String(newUserId))
+    );
+    const existing = await getDocs(q);
+    if (!existing.empty) return;
+
+    await addDoc(collection(db, "referral_history"), {
+      referrerId: String(startParam),
+      newUserId: String(newUserId),
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
+  } catch (e) {
+    console.error("Referral error:", e);
+  }
+}
+
 async function createOrUpdateUser() {
   const userRef = doc(db, "users", String(user.id));
   const snap = await getDoc(userRef);
   const deviceHash = generateDeviceHash();
   const location = await detectLocation();
 
+  // ===== MULTI ACCOUNT BLOCK (Device Hash) =====
   if (!snap.exists()) {
+    const deviceQuery = query(
+      collection(db, "users"),
+      where("deviceHash", "==", deviceHash)
+    );
+    const deviceSnap = await getDocs(deviceQuery);
+
+    if (!deviceSnap.empty) {
+      document.getElementById("app").innerHTML = `
+        <div class="loader-box">
+          <div class="logo-circle">🚫</div>
+          <h1>ডিভাইস ব্লক</h1>
+          <p class="error">এই ফোন দিয়ে ইতিমধ্যে একটি অ্যাকাউন্ট খোলা আছে।<br>এক ডিভাইসে শুধুমাত্র একটি অ্যাকাউন্ট অনুমোদিত।</p>
+        </div>
+      `;
+      throw new Error("Device already registered");
+    }
+  }
+
+  if (!snap.exists()) {
+    // ========== NEW USER ==========
     const ipHistory = location ? [{
       ip: location.ip,
       country: location.country,
@@ -182,6 +220,7 @@ async function createOrUpdateUser() {
       paymentNumber: "",
       deviceHash: deviceHash,
       isBanned: false,
+      referredBy: startParam || "",
       country: location ? location.country : "Unknown",
       countryCode: location ? location.countryCode : "",
       lastIP: location ? location.ip : "",
@@ -192,15 +231,10 @@ async function createOrUpdateUser() {
       lastActiveAt: serverTimestamp()
     });
 
-    if (startParam && startParam !== String(user.id)) {
-      await addDoc(collection(db, "referral_history"), {
-        referrerId: String(startParam),
-        newUserId: String(user.id),
-        status: "pending",
-        createdAt: serverTimestamp()
-      });
-    }
+    await createReferralRecord(user.id);
+
   } else {
+    // ========== EXISTING USER ==========
     const data = snap.data();
 
     if (data.isBanned) {
@@ -221,6 +255,11 @@ async function createOrUpdateUser() {
       firstName: user.first_name || data.firstName || "",
       photoUrl: user.photo_url || data.photoUrl || ""
     };
+
+    if (!data.referredBy && startParam && startParam !== String(user.id)) {
+      updateData.referredBy = startParam;
+      await createReferralRecord(user.id);
+    }
 
     if (location && location.ip) {
       const oldHistory = data.ipHistory || [];
@@ -256,7 +295,6 @@ async function loadHome() {
 
   const data = snap.data();
 
-  // Status - safe way
   let statusText = "Inactive";
   let statusClass = "status-inactive";
   if (data.status === "Active") {
@@ -353,7 +391,6 @@ async function loadHome() {
     </div>
   `;
 
-  // Admin bottom nav
   if (data.role === "admin") {
     const nav = document.querySelector(".bottom-nav");
     if (nav && !nav.querySelector('a[href="admin/index.html"]')) {
@@ -372,7 +409,7 @@ async function loadHome() {
     await createOrUpdateUser();
     await loadHome();
   } catch (err) {
-    if (err.message !== "Banned") {
+    if (err.message !== "Banned" && err.message !== "Device already registered") {
       console.error(err);
       document.getElementById("app").innerHTML = `
         <div class="loader-box">
