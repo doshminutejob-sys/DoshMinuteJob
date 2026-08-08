@@ -3,6 +3,10 @@ import {
   doc,
   getDoc,
   updateDoc,
+  collection,
+  query,
+  where,
+  getDocs,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -19,240 +23,186 @@ tg.setHeaderColor("#0B1220");
 tg.setBackgroundColor("#0B1220");
 
 const user = tg.initDataUnsafe.user;
+let userData = null;
 
 async function loadProfile() {
-  const userRef = doc(db, "users", String(user.id));
-  const snap = await getDoc(userRef);
-
+  const snap = await getDoc(doc(db, "users", String(user.id)));
   if (!snap.exists()) {
     location.href = "index.html";
     return;
   }
 
-  const data = snap.data();
+  userData = snap.data();
 
-  // Update last active
-  await updateDoc(userRef, { lastActiveAt: serverTimestamp() });
-
-  if (data.isBanned) {
+  if (userData.isBanned) {
     document.getElementById("app").innerHTML = `
       <div class="loader-box">
         <div class="logo-circle">🚫</div>
         <h1>অ্যাকাউন্ট ব্যান</h1>
-        <p class="error">আপনার অ্যাকাউন্ট স্থগিত করা হয়েছে</p>
+        <p class="error">আপনার অ্যাকাউন্ট স্থগিত</p>
       </div>
     `;
     return;
   }
 
-  const statusClass = data.status === "Active" ? "status-active" : "status-inactive";
-  const statusText = data.status === "Active" ? "Active" : "Inactive";
+  const isActive = userData.status === "Active";
+  const statusText = isActive ? "Active" : "Inactive";
+  const statusClass = isActive ? "status-active" : "status-inactive";
 
-  const joinDate = data.createdAt?.toDate
-    ? data.createdAt.toDate().toLocaleDateString("bn-BD", {
-        day: "numeric",
-        month: "long",
-        year: "numeric"
-      })
-    : "—";
-
-  // Facebook Section
-  let fbSection = "";
-  if (!data.facebookLink) {
-    fbSection = `
+  let activationSection = "";
+  if (!isActive) {
+    activationSection = `
       <div class="card warning-card">
         <div class="card-title">⚠️ অ্যাকাউন্ট এক্টিভেট করুন</div>
-        <p>Facebook প্রোফাইল লিংক দিলেই আপনার অ্যাকাউন্ট Active হবে এবং সব ফিচার আনলক হবে।</p>
-        <input type="url" id="fbInput" placeholder="https://facebook.com/your.profile">
-        <button class="btn" id="saveFbBtn" style="margin-top:12px;">লিংক সাবমিট করুন</button>
+        <p>Facebook প্রোফাইল লিংক দিন। একই লিংক অন্য অ্যাকাউন্টে ব্যবহার করা যাবে না।</p>
+        <input id="fbInput" type="url" placeholder="https://facebook.com/your.profile" style="margin-top:10px;">
+        <button class="btn" id="activateBtn" style="margin-top:10px;">এক্টিভেট করুন</button>
       </div>
     `;
   } else {
-    fbSection = `
+    activationSection = `
       <div class="card">
-        <div class="card-title">📘 Facebook প্রোফাইল</div>
-        <p style="font-size:13px;word-break:break-all;margin-bottom:10px;">
-          <a href="${data.facebookLink}" target="_blank" style="color:var(--green);text-decoration:none;">
-            ${data.facebookLink}
-          </a>
+        <div class="card-title">📘 Facebook</div>
+        <p style="word-break:break-all;font-size:13px;">
+          ${userData.facebookLink || "—"}
         </p>
-        <button class="btn" id="changeFbBtn" style="background:var(--card2);color:var(--text);border:1px solid var(--border);">
-          লিংক পরিবর্তন করুন
-        </button>
       </div>
     `;
   }
-
-  // Payment Section
-  const paymentSection = `
-    <div class="card">
-      <div class="card-title">💳 পেমেন্ট তথ্য</div>
-      
-      <label style="font-size:12px;color:var(--muted);">পেমেন্ট মেথড</label>
-      <select id="payMethod">
-        <option value="">সিলেক্ট করুন</option>
-        <option value="Bkash" ${data.paymentMethod === "Bkash" ? "selected" : ""}>বিকাশ</option>
-        <option value="Nagad" ${data.paymentMethod === "Nagad" ? "selected" : ""}>নগদ</option>
-      </select>
-
-      <label style="font-size:12px;color:var(--muted);margin-top:12px;display:block;">মোবাইল নাম্বার</label>
-      <input type="text" id="payNumber" placeholder="01XXXXXXXXX" value="${data.paymentNumber || ""}">
-
-      <button class="btn" id="savePayBtn" style="margin-top:14px;">পেমেন্ট তথ্য সেভ করুন</button>
-    </div>
-  `;
 
   document.getElementById("app").innerHTML = `
     <div class="page">
       <div class="hero">
         <div class="hero-top">
-          <img src="${data.photoUrl || 'images/default-avatar.png'}" class="avatar" onerror="this.src='images/default-avatar.png'">
+          <img src="${userData.photoUrl || 'images/default-avatar.png'}" class="avatar" onerror="this.src='images/default-avatar.png'">
           <div>
-            <div class="hero-name">${data.firstName || "User"} ${data.lastName || ""}</div>
-            <div class="hero-username">@${data.username || "unknown"}</div>
+            <div class="hero-name">${userData.firstName || "User"}</div>
+            <div class="hero-username">@${userData.username || "unknown"}</div>
             <span class="status-badge \( {statusClass}"> \){statusText}</span>
           </div>
-        </div>
-        <div class="balance-box">
-          <div class="balance-label">বর্তমান ব্যালেন্স</div>
-          <div class="balance-amount">💰 ${Number(data.coin || 0).toLocaleString()}</div>
         </div>
       </div>
 
       <div class="stats">
         <div class="stat">
-          <div class="stat-value">${Number(data.totalEarned || 0).toLocaleString()}</div>
-          <div class="stat-label">মোট আয়</div>
+          <div class="stat-value">${Number(userData.coin || 0).toLocaleString()}</div>
+          <div class="stat-label">কয়েন</div>
         </div>
         <div class="stat">
-          <div class="stat-value">${data.activeReferrals || 0}</div>
+          <div class="stat-value">${userData.activeReferrals || 0}</div>
           <div class="stat-label">একটিভ রেফার</div>
         </div>
         <div class="stat">
-          <div class="stat-value">${data.referrals || 0}</div>
+          <div class="stat-value">${userData.referrals || 0}</div>
           <div class="stat-label">মোট রেফার</div>
         </div>
         <div class="stat">
-          <div class="stat-value">${Number(data.totalWithdraw || 0).toLocaleString()}</div>
-          <div class="stat-label">উইথড্র</div>
+          <div class="stat-value">${Number(userData.totalEarned || 0).toLocaleString()}</div>
+          <div class="stat-label">মোট আয়</div>
         </div>
       </div>
 
-      ${fbSection}
-      ${paymentSection}
+      ${activationSection}
 
       <div class="card">
-        <div class="card-title">📋 অ্যাকাউন্ট তথ্য</div>
-        <div style="font-size:13px;line-height:1.9;">
-          <div style="display:flex;justify-content:space-between;">
-            <span style="color:var(--muted);">Telegram ID</span>
-            <span>${data.telegramId}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;">
-            <span style="color:var(--muted);">ইউজারনেম</span>
-            <span>@${data.username || "—"}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;">
-            <span style="color:var(--muted);">স্ট্যাটাস</span>
-            <span>${data.status}</span>
-          </div>
-          <div style="display:flex;justify-content:space-between;">
-            <span style="color:var(--muted);">যোগদান</span>
-            <span>${joinDate}</span>
-          </div>
-        </div>
+        <div class="card-title">💳 পেমেন্ট তথ্য</div>
+        <select id="paymentMethod" style="margin-bottom:8px;">
+          <option value="">পেমেন্ট মেথড সিলেক্ট করুন</option>
+          <option value="Bkash" ${userData.paymentMethod === "Bkash" ? "selected" : ""}>Bkash</option>
+          <option value="Nagad" ${userData.paymentMethod === "Nagad" ? "selected" : ""}>Nagad</option>
+        </select>
+        <input id="paymentNumber" type="text" placeholder="পেমেন্ট নাম্বার" value="${userData.paymentNumber || ""}">
+        <button class="btn" id="savePaymentBtn" style="margin-top:10px;">সেভ করুন</button>
+      </div>
+
+      <div class="card">
+        <div class="card-title">অ্যাকাউন্ট তথ্য</div>
+        <p style="font-size:13px;line-height:1.7;color:var(--muted);">
+          Telegram ID: ${userData.telegramId}<br>
+          দেশ: ${userData.country || "অজানা"}<br>
+          জয়েন: ${userData.createdAt?.toDate ? userData.createdAt.toDate().toLocaleDateString("bn-BD") : "—"}
+        </p>
       </div>
     </div>
   `;
 
-  // ===== Events =====
-
-  // Save Facebook
-  const saveFbBtn = document.getElementById("saveFbBtn");
-  if (saveFbBtn) {
-    saveFbBtn.onclick = async () => {
-      const link = document.getElementById("fbInput").value.trim();
-
-      if (!link) {
-        return tg.showAlert("Facebook লিংক দিন");
-      }
-      if (!link.includes("facebook.com") && !link.includes("fb.com") && !link.includes("fb.me")) {
-        return tg.showAlert("সঠিক Facebook লিংক দিন");
-      }
-
-      saveFbBtn.disabled = true;
-      saveFbBtn.innerText = "সেভ হচ্ছে...";
-
-      try {
-        await updateDoc(userRef, {
-          facebookLink: link,
-          status: "Active",
-          lastActiveAt: serverTimestamp()
-        });
-        tg.showAlert("✅ অ্যাকাউন্ট সফলভাবে Active হয়েছে!");
-        loadProfile();
-      } catch (e) {
-        tg.showAlert("সমস্যা: " + e.message);
-        saveFbBtn.disabled = false;
-        saveFbBtn.innerText = "লিংক সাবমিট করুন";
-      }
-    };
+  // Activate button
+  const activateBtn = document.getElementById("activateBtn");
+  if (activateBtn) {
+    activateBtn.onclick = activateAccount;
   }
 
-  // Change Facebook
-  const changeFbBtn = document.getElementById("changeFbBtn");
-  if (changeFbBtn) {
-    changeFbBtn.onclick = () => {
-      const card = changeFbBtn.closest(".card");
-      card.innerHTML = `
-        <div class="card-title">📘 Facebook লিংক পরিবর্তন</div>
-        <input type="url" id="fbInput" value="${data.facebookLink}" placeholder="https://facebook.com/your.profile">
-        <button class="btn" id="saveFbBtn" style="margin-top:12px;">আপডেট করুন</button>
-      `;
+  // Save payment
+  const savePaymentBtn = document.getElementById("savePaymentBtn");
+  if (savePaymentBtn) {
+    savePaymentBtn.onclick = savePayment;
+  }
+}
 
-      document.getElementById("saveFbBtn").onclick = async () => {
-        const link = document.getElementById("fbInput").value.trim();
-        if (!link) return tg.showAlert("লিংক দিন");
+async function activateAccount() {
+  const fbInput = document.getElementById("fbInput");
+  const fbLink = (fbInput?.value || "").trim();
 
-        await updateDoc(userRef, {
-          facebookLink: link,
-          lastActiveAt: serverTimestamp()
-        });
-        tg.showAlert("আপডেট হয়েছে");
-        loadProfile();
-      };
-    };
+  if (!fbLink) {
+    return tg.showAlert("Facebook লিংক দিন");
   }
 
-  // Save Payment
-  document.getElementById("savePayBtn").onclick = async () => {
-    const method = document.getElementById("payMethod").value;
-    const number = document.getElementById("payNumber").value.trim();
+  if (!fbLink.includes("facebook.com") && !fbLink.includes("fb.com")) {
+    return tg.showAlert("সঠিক Facebook প্রোফাইল লিংক দিন");
+  }
 
-    if (!method) return tg.showAlert("পেমেন্ট মেথড সিলেক্ট করুন");
-    if (!number) return tg.showAlert("মোবাইল নাম্বার দিন");
-    if (!/^01[3-9][0-9]{8}$/.test(number)) {
-      return tg.showAlert("সঠিক ১১ ডিজিটের বাংলাদেশি নাম্বার দিন");
+  // ===== FACEBOOK DUPLICATE CHECK =====
+  try {
+    const fbQuery = query(
+      collection(db, "users"),
+      where("facebookLink", "==", fbLink)
+    );
+    const fbSnap = await getDocs(fbQuery);
+
+    let alreadyUsed = false;
+    fbSnap.forEach(d => {
+      if (d.id !== String(user.id)) {
+        alreadyUsed = true;
+      }
+    });
+
+    if (alreadyUsed) {
+      return tg.showAlert("এই Facebook লিংক ইতিমধ্যে অন্য অ্যাকাউন্টে ব্যবহার করা হয়েছে। অন্য লিংক ব্যবহার করুন।");
     }
 
-    const btn = document.getElementById("savePayBtn");
-    btn.disabled = true;
-    btn.innerText = "সেভ হচ্ছে...";
+    // Activate
+    await updateDoc(doc(db, "users", String(user.id)), {
+      facebookLink: fbLink,
+      status: "Active",
+      lastActiveAt: serverTimestamp()
+    });
 
-    try {
-      await updateDoc(userRef, {
-        paymentMethod: method,
-        paymentNumber: number,
-        lastActiveAt: serverTimestamp()
-      });
-      tg.showAlert("✅ পেমেন্ট তথ্য সেভ হয়েছে");
-      loadProfile();
-    } catch (e) {
-      tg.showAlert("সমস্যা: " + e.message);
-      btn.disabled = false;
-      btn.innerText = "পেমেন্ট তথ্য সেভ করুন";
-    }
-  };
+    tg.showAlert("✅ অ্যাকাউন্ট সফলভাবে এক্টিভ হয়েছে!");
+    loadProfile();
+
+  } catch (e) {
+    tg.showAlert("সমস্যা: " + e.message);
+  }
+}
+
+async function savePayment() {
+  const method = document.getElementById("paymentMethod").value;
+  const number = document.getElementById("paymentNumber").value.trim();
+
+  if (!method || !number) {
+    return tg.showAlert("পেমেন্ট মেথড ও নাম্বার দিন");
+  }
+
+  try {
+    await updateDoc(doc(db, "users", String(user.id)), {
+      paymentMethod: method,
+      paymentNumber: number,
+      lastActiveAt: serverTimestamp()
+    });
+    tg.showAlert("পেমেন্ট তথ্য সেভ হয়েছে");
+  } catch (e) {
+    tg.showAlert("সমস্যা: " + e.message);
+  }
 }
 
 loadProfile().catch(err => {
