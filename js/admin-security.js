@@ -27,231 +27,237 @@ tg.setBackgroundColor("#0B1220");
 const adminUser = tg.initDataUnsafe.user;
 
 async function checkAdmin() {
-  const snap = await getDoc(doc(db, "users", String(adminUser.id)));
-  if (!snap.exists() || snap.data().role !== "admin") {
+  try {
+    const snap = await getDoc(doc(db, "users", String(adminUser.id)));
+    if (!snap.exists() || snap.data().role !== "admin") {
+      document.getElementById("app").innerHTML = `
+        <div class="loader-box">
+          <div class="logo-circle">⛔</div>
+          <h1>অ্যাক্সেস ডিনাইড</h1>
+          <p>আপনি অ্যাডমিন নন</p>
+        </div>
+      `;
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("Admin check error:", e);
     document.getElementById("app").innerHTML = `
       <div class="loader-box">
-        <div class="logo-circle">⛔</div>
-        <h1>অ্যাক্সেস ডিনাইড</h1>
-        <p>আপনি অ্যাডমিন নন</p>
+        <h1>সমস্যা</h1>
+        <p class="error">অ্যাডমিন চেক করতে ব্যর্থ: ${e.message}</p>
       </div>
     `;
-    throw new Error("Not Admin");
+    return false;
   }
 }
 
 function getTrafficLevel(count) {
-  if (count >= 50) return { text: "High", class: "green" };
-  if (count >= 15) return { text: "Medium", class: "yellow" };
-  return { text: "Low", class: "red" };
+  if (count >= 50) return { text: "High", cls: "badge-active" };
+  if (count >= 15) return { text: "Medium", cls: "badge-pending" };
+  return { text: "Low", cls: "badge-rejected" };
 }
 
 async function loadSecurity() {
-  await checkAdmin();
+  const isAdmin = await checkAdmin();
+  if (!isAdmin) return;
 
-  const snap = await getDocs(collection(db, "users"));
-  const users = [];
-  snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+  try {
+    const snap = await getDocs(collection(db, "users"));
+    const users = [];
+    snap.forEach(d => {
+      users.push({ id: d.id, ...d.data() });
+    });
 
-  // ===== Country Stats =====
-  const countryMap = {};
-  users.forEach(u => {
-    const c = u.country || "Unknown";
-    if (!countryMap[c]) countryMap[c] = 0;
-    countryMap[c]++;
-  });
+    // Country Stats
+    const countryMap = {};
+    users.forEach(u => {
+      const c = u.country || "Unknown";
+      countryMap[c] = (countryMap[c] || 0) + 1;
+    });
 
-  const countryList = Object.entries(countryMap)
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
+    const countryList = Object.entries(countryMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
 
-  // ===== Duplicate Detection =====
-  const fbMap = {};
-  const deviceMap = {};
-  const paymentMap = {};
+    // Duplicates
+    const fbMap = {}, deviceMap = {}, paymentMap = {};
+    users.forEach(u => {
+      if (u.facebookLink) fbMap[u.facebookLink] = (fbMap[u.facebookLink] || 0) + 1;
+      if (u.deviceHash) deviceMap[u.deviceHash] = (deviceMap[u.deviceHash] || 0) + 1;
+      if (u.paymentNumber) paymentMap[u.paymentNumber] = (paymentMap[u.paymentNumber] || 0) + 1;
+    });
 
-  users.forEach(u => {
-    if (u.facebookLink) fbMap[u.facebookLink] = (fbMap[u.facebookLink] || 0) + 1;
-    if (u.deviceHash) deviceMap[u.deviceHash] = (deviceMap[u.deviceHash] || 0) + 1;
-    if (u.paymentNumber) paymentMap[u.paymentNumber] = (paymentMap[u.paymentNumber] || 0) + 1;
-  });
+    let duplicateFB = 0, duplicateDevice = 0;
+    const seenFB = new Set(), seenDevice = new Set();
 
-  let duplicateFB = 0, duplicateDevice = 0, duplicatePayment = 0;
-  const seenFB = new Set(), seenDevice = new Set(), seenPayment = new Set();
+    const suspiciousList = [];
 
-  // ===== Suspicious List =====
-  const suspiciousList = [];
+    users.forEach(u => {
+      const issues = [];
 
-  users.forEach(u => {
-    const issues = [];
+      if (u.facebookLink && fbMap[u.facebookLink] > 1) {
+        issues.push("Duplicate Facebook");
+        if (!seenFB.has(u.facebookLink)) {
+          duplicateFB++;
+          seenFB.add(u.facebookLink);
+        }
+      }
+      if (u.deviceHash && deviceMap[u.deviceHash] > 1) {
+        issues.push("Duplicate Device");
+        if (!seenDevice.has(u.deviceHash)) {
+          duplicateDevice++;
+          seenDevice.add(u.deviceHash);
+        }
+      }
+      if (u.vpnSuspected || (u.vpnScore || 0) >= 30) {
+        issues.push("VPN Score: " + (u.vpnScore || 0));
+      }
+      if (u.isBanned) {
+        issues.push("Banned");
+      }
 
-    if (u.facebookLink && fbMap[u.facebookLink] > 1) {
-      issues.push("Duplicate Facebook");
-      if (!seenFB.has(u.facebookLink)) { duplicateFB++; seenFB.add(u.facebookLink); }
+      if (issues.length > 0) {
+        suspiciousList.push({ ...u, issues });
+      }
+    });
+
+    suspiciousList.sort((a, b) => (b.vpnScore || 0) - (a.vpnScore || 0));
+
+    // Country HTML
+    let countryHtml = "";
+    if (countryList.length === 0) {
+      countryHtml = `<div style="color:var(--muted);font-size:13px;padding:10px 0;">এখনো কোনো দেশের ডেটা নেই</div>`;
+    } else {
+      countryList.forEach(c => {
+        const level = getTrafficLevel(c.count);
+        countryHtml += `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+            <div>
+              <div style="font-weight:600;">${c.name}</div>
+              <div style="font-size:11px;color:var(--muted);">${c.count} জন</div>
+            </div>
+            <span class="badge \( {level.cls}"> \){level.text}</span>
+          </div>
+        `;
+      });
     }
-    if (u.deviceHash && deviceMap[u.deviceHash] > 1) {
-      issues.push("Duplicate Device");
-      if (!seenDevice.has(u.deviceHash)) { duplicateDevice++; seenDevice.add(u.deviceHash); }
-    }
-    if (u.paymentNumber && paymentMap[u.paymentNumber] > 1) {
-      issues.push("Duplicate Payment");
-      if (!seenPayment.has(u.paymentNumber)) { duplicatePayment++; seenPayment.add(u.paymentNumber); }
-    }
-    if (u.vpnSuspected || (u.vpnScore || 0) >= 30) {
-      issues.push("VPN Suspected (Score: " + (u.vpnScore || 0) + ")");
-    }
-    if (u.isBanned) {
-      issues.push("Already Banned");
-    }
 
-    if (issues.length > 0) {
-      suspiciousList.push({ ...u, issues });
-    }
-  });
-
-  // Sort: VPN first, then others
-  suspiciousList.sort((a, b) => (b.vpnScore || 0) - (a.vpnScore || 0));
-
-  // ===== Country HTML =====
-  let countryHtml = "";
-  countryList.forEach(c => {
-    const level = getTrafficLevel(c.count);
-    countryHtml += `
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
-        <div>
-          <div style="font-weight:600;">${c.name}</div>
-          <div style="font-size:11px;color:var(--muted);">${c.count} জন ইউজার</div>
+    // Suspicious HTML
+    let suspiciousHtml = "";
+    if (suspiciousList.length === 0) {
+      suspiciousHtml = `
+        <div class="section-card" style="text-align:center;color:var(--muted);">
+          ✅ কোনো সন্দেহজনক অ্যাকাউন্ট নেই
         </div>
-        <span class="badge ${level.class === 'green' ? 'badge-active' : level.class === 'yellow' ? 'badge-pending' : 'badge-rejected'}">
-          ${level.text}
-        </span>
+      `;
+    } else {
+      suspiciousList.forEach(u => {
+        suspiciousHtml += `
+          <div class="item-card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+              <div>
+                <div style="font-weight:700;">👤 ${u.firstName || "User"}</div>
+                <div style="font-size:12px;color:var(--muted);">@${u.username || "—"} • ${u.telegramId}</div>
+              </div>
+              ${u.isBanned ? `<span class="badge badge-rejected">Banned</span>` : `<span class="badge badge-pending">Suspicious</span>`}
+            </div>
+
+            <div style="font-size:11px;margin-bottom:8px;">
+              \( {u.issues.map(i => `<span class="badge badge-rejected" style="margin:2px 3px 2px 0;"> \){i}</span>`).join("")}
+            </div>
+
+            <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px;">
+              <div>📍 ${u.country || "Unknown"}</div>
+              <div>📡 VPN Score: ${u.vpnScore || 0}</div>
+              <div>💰 ${Number(u.coin || 0).toLocaleString()} কয়েন</div>
+            </div>
+
+            ${!u.isBanned ? `
+              <button class="btn-danger" style="padding:10px;font-size:13px;" onclick="window.banUser('${u.id}')">
+                🚫 ব্যান করুন
+              </button>
+            ` : `
+              <button class="btn-secondary" style="padding:10px;font-size:13px;" onclick="window.unbanUser('${u.id}')">
+                আনব্যান করুন
+              </button>
+            `}
+          </div>
+        `;
+      });
+    }
+
+    document.getElementById("app").innerHTML = `
+      <div class="admin-page">
+        <div class="admin-header">
+          <h1>🛡 সিকিউরিটি সেন্টার</h1>
+          <p>কান্ট্রি ট্রাফিক + VPN + ফ্রড</p>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">মোট ইউজার</div>
+            <div class="stat-value">${users.length}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Duplicate FB</div>
+            <div class="stat-value yellow">${duplicateFB}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Duplicate Device</div>
+            <div class="stat-value yellow">${duplicateDevice}</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">VPN সন্দেহ</div>
+            <div class="stat-value red">${users.filter(u => u.vpnSuspected || (u.vpnScore||0) >= 30).length}</div>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <h2>🌍 দেশ অনুযায়ী ট্রাফিক</h2>
+          <div style="max-height:240px;overflow-y:auto;">
+            ${countryHtml}
+          </div>
+        </div>
+
+        <div style="font-size:15px;font-weight:700;margin:16px 0 10px;">
+          🚨 সন্দেহজনক অ্যাকাউন্ট (${suspiciousList.length})
+        </div>
+
+        ${suspiciousHtml}
+
+        <div style="margin-top:18px;">
+          <a href="index.html" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;">
+            ← ড্যাশবোর্ডে ফিরে যান
+          </a>
+        </div>
       </div>
     `;
-  });
 
-  // ===== Suspicious HTML =====
-  let suspiciousHtml = "";
-  suspiciousList.forEach(u => {
-    const ipHistoryText = (u.ipHistory || [])
-      .slice(-4)
-      .map(h => h.country + " (" + (h.ip || "").slice(0, 12) + ")")
-      .join(" → ") || "নেই";
-
-    suspiciousHtml += `
-      <div class="item-card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
-          <div>
-            <div style="font-weight:700;font-size:15px;margin-bottom:3px;">
-              👤 ${u.firstName || "User"} ${u.lastName || ""}
-            </div>
-            <div style="font-size:12px;color:var(--muted);">
-              @${u.username || "—"} • ${u.telegramId}
-            </div>
-          </div>
-          ${u.isBanned
-            ? `<span class="badge badge-rejected">Banned</span>`
-            : `<span class="badge badge-pending">Suspicious</span>`
-          }
-        </div>
-
-        <div style="font-size:11px;margin-bottom:10px;">
-          \( {u.issues.map(i => `<span class="badge badge-rejected" style="margin:2px 4px 2px 0;"> \){i}</span>`).join("")}
-        </div>
-
-        <div style="font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:12px;">
-          <div>📍 দেশ: <b>${u.country || "Unknown"}</b></div>
-          <div>📡 VPN Score: <b>${u.vpnScore || 0}</b></div>
-          <div>📱 Device: ${u.deviceHash || "—"}</div>
-          \( {u.facebookLink ? `<div>📘 <a href=" \){u.facebookLink}" target="_blank" style="color:var(--green);">Facebook</a></div>` : ""}
-          ${u.paymentNumber ? `<div>💳 ${u.paymentMethod || ""}: ${u.paymentNumber}</div>` : ""}
-          <div style="margin-top:6px;font-size:11px;">IP History: ${ipHistoryText}</div>
-          <div>💰 কয়েন: ${Number(u.coin || 0).toLocaleString()}</div>
-        </div>
-
-        ${!u.isBanned ? `
-          <button class="btn-danger" style="padding:11px;font-size:13px;"
-            onclick="window.banUser('${u.id}')">
-            🚫 ইউজার ব্যান করুন
-          </button>
-        ` : `
-          <button class="btn-secondary" style="padding:11px;font-size:13px;"
-            onclick="window.unbanUser('${u.id}')">
-            আনব্যান করুন
-          </button>
-        `}
+  } catch (err) {
+    console.error(err);
+    document.getElementById("app").innerHTML = `
+      <div class="loader-box">
+        <h1>সমস্যা হয়েছে</h1>
+        <p class="error">${err.message}</p>
+        <br>
+        <button class="btn-primary" onclick="location.reload()">আবার চেষ্টা করুন</button>
       </div>
     `;
-  });
-
-  document.getElementById("app").innerHTML = `
-    <div class="admin-page">
-      <div class="admin-header">
-        <h1>🛡 সিকিউরিটি সেন্টার</h1>
-        <p>কান্ট্রি ট্রাফিক + VPN + ফ্রড ডিটেকশন</p>
-      </div>
-
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">মোট ইউজার</div>
-          <div class="stat-value">${users.length}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Duplicate FB</div>
-          <div class="stat-value yellow">${duplicateFB}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Duplicate Device</div>
-          <div class="stat-value yellow">${duplicateDevice}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">VPN সন্দেহ</div>
-          <div class="stat-value red">${users.filter(u => u.vpnSuspected || (u.vpnScore || 0) >= 30).length}</div>
-        </div>
-      </div>
-
-      <!-- Country Traffic -->
-      <div class="section-card">
-        <h2>🌍 দেশ অনুযায়ী ট্রাফিক</h2>
-        <div style="max-height:260px;overflow-y:auto;">
-          ${countryHtml || `<div style="color:var(--muted);font-size:13px;">এখনো ডেটা নেই</div>`}
-        </div>
-      </div>
-
-      <div style="font-size:15px;font-weight:700;margin:18px 0 12px;">
-        🚨 সন্দেহজনক অ্যাকাউন্ট (${suspiciousList.length})
-      </div>
-
-      <div>
-        ${suspiciousHtml || `
-          <div class="section-card" style="text-align:center;color:var(--muted);">
-            ✅ কোনো সন্দেহজনক অ্যাকাউন্ট পাওয়া যায়নি
-          </div>
-        `}
-      </div>
-
-      <div style="margin-top:18px;">
-        <a href="index.html" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;">
-          ← ড্যাশবোর্ডে ফিরে যান
-        </a>
-      </div>
-    </div>
-  `;
+  }
 }
 
 window.banUser = async function(uid) {
-  if (!confirm("এই ইউজারকে ব্যান করবেন?\n\nডিভাইস হ্যাশ ফ্ল্যাগ করা হবে।")) return;
-
+  if (!confirm("এই ইউজারকে ব্যান করবেন?")) return;
   try {
     const userRef = doc(db, "users", uid);
     const snap = await getDoc(userRef);
     const data = snap.data() || {};
-
     await updateDoc(userRef, {
       isBanned: true,
       status: "Banned",
       banDeviceHash: data.deviceHash || ""
     });
-
     tg.showAlert("ইউজার ব্যান হয়েছে");
     loadSecurity();
   } catch (e) {
@@ -260,24 +266,21 @@ window.banUser = async function(uid) {
 };
 
 window.unbanUser = async function(uid) {
-  if (!confirm("এই ইউজারকে আনব্যান করবেন?")) return;
-
+  if (!confirm("আনব্যান করবেন?")) return;
   try {
     const userRef = doc(db, "users", uid);
     const snap = await getDoc(userRef);
     const data = snap.data() || {};
-
     await updateDoc(userRef, {
       isBanned: false,
       status: data.facebookLink ? "Active" : "Inactive",
       banDeviceHash: ""
     });
-
-    tg.showAlert("ইউজার আনব্যান হয়েছে");
+    tg.showAlert("আনব্যান হয়েছে");
     loadSecurity();
   } catch (e) {
     tg.showAlert("সমস্যা: " + e.message);
   }
 };
 
-loadSecurity().catch(err => console.error(err));
+loadSecurity();
