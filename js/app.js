@@ -47,6 +47,61 @@ function generateDeviceHash() {
   return "dh_" + Math.abs(hash).toString(36);
 }
 
+// ===== IP + Country Detection =====
+async function detectLocation() {
+  try {
+    const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return {
+      ip: data.ip || "",
+      country: data.country_name || "Unknown",
+      countryCode: data.country_code || "",
+      city: data.city || ""
+    };
+  } catch (e) {
+    console.log("Location detect failed", e);
+    return null;
+  }
+}
+
+function checkVpnSuspicion(ipHistory, newIP, newCountry) {
+  const now = Date.now();
+  const sevenDays = 7 * 24 * 60 * 60 * 1000;
+
+  // Keep only last 7 days records
+  const recent = (ipHistory || []).filter(item => now - item.time < sevenDays);
+
+  // Unique IPs in last 7 days
+  const uniqueIPs = new Set(recent.map(i => i.ip));
+  uniqueIPs.add(newIP);
+
+  // Unique countries
+  const uniqueCountries = new Set(recent.map(i => i.country).filter(Boolean));
+  if (newCountry) uniqueCountries.add(newCountry);
+
+  let vpnScore = 0;
+  let vpnSuspected = false;
+
+  if (uniqueIPs.size >= 3) {
+    vpnScore += 40;
+    vpnSuspected = true;
+  } else if (uniqueIPs.size === 2) {
+    vpnScore += 20;
+  }
+
+  if (uniqueCountries.size >= 2) {
+    vpnScore += 30;
+    vpnSuspected = true;
+  }
+
+  return {
+    vpnScore: Math.min(vpnScore, 100),
+    vpnSuspected,
+    recentHistory: recent
+  };
+}
+
 async function ensureSettings() {
   const ref = doc(db, "system_settings", "main");
   const snap = await getDoc(ref);
@@ -67,8 +122,16 @@ async function createOrUpdateUser() {
   const userRef = doc(db, "users", String(user.id));
   const snap = await getDoc(userRef);
   const deviceHash = generateDeviceHash();
+  const location = await detectLocation();
 
   if (!snap.exists()) {
+    const ipHistory = location ? [{
+      ip: location.ip,
+      country: location.country,
+      countryCode: location.countryCode,
+      time: Date.now()
+    }] : [];
+
     await setDoc(userRef, {
       telegramId: user.id,
       username: user.username || "",
@@ -88,6 +151,12 @@ async function createOrUpdateUser() {
       paymentNumber: "",
       deviceHash: deviceHash,
       isBanned: false,
+      country: location?.country || "Unknown",
+      countryCode: location?.countryCode || "",
+      lastIP: location?.ip || "",
+      ipHistory: ipHistory,
+      vpnSuspected: false,
+      vpnScore: 0,
       createdAt: serverTimestamp(),
       lastActiveAt: serverTimestamp()
     });
@@ -114,13 +183,48 @@ async function createOrUpdateUser() {
       throw new Error("Banned");
     }
 
-    await updateDoc(userRef, {
+    let updateData = {
       lastActiveAt: serverTimestamp(),
       deviceHash: deviceHash,
       username: user.username || data.username,
       firstName: user.first_name || data.firstName,
       photoUrl: user.photo_url || data.photoUrl || ""
-    });
+    };
+
+    // Location + VPN check
+    if (location && location.ip) {
+      const oldHistory = data.ipHistory || [];
+      const { vpnScore, vpnSuspected, recentHistory } = checkVpnSuspicion(
+        oldHistory,
+        location.ip,
+        location.country
+      );
+
+      // Add new IP if different from last one
+      let newHistory = [...recentHistory];
+      if (data.lastIP !== location.ip) {
+        newHistory.push({
+          ip: location.ip,
+          country: location.country,
+          countryCode: location.countryCode,
+          time: Date.now()
+        });
+      }
+
+      // Keep max 8 records
+      if (newHistory.length > 8) {
+        newHistory = newHistory.slice(-8);
+      }
+
+      updateData.country = location.country;
+      updateData.countryCode = location.countryCode;
+      updateData.lastIP = location.ip;
+      updateData.ipHistory = newHistory;
+      updateData.vpnScore = Math.max(data.vpnScore || 0, vpnScore);
+      updateData.vpnSuspected = data.vpnSuspected || vpnSuspected;
+    }
+
+    await updateDoc(userRef, updateData);
   }
 }
 
@@ -134,6 +238,10 @@ async function loadHome() {
   const isActive = data.status === "Active";
   const statusClass = isActive ? "status-active" : "status-inactive";
   const statusText = isActive ? "Active" : "Inactive";
+
+  const countryText = data.country && data.country !== "Unknown"
+    ? data.country
+    : "অজানা";
 
   let activationCard = "";
   if (!isActive) {
@@ -192,10 +300,17 @@ async function loadHome() {
         </div>
       </div>
 
+      <div class="card" style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <div style="font-size:13px;color:var(--muted);">📍 আপনার লোকেশন</div>
+          <div style="font-weight:600;margin-top:3px;">${countryText}</div>
+        </div>
+        ${data.vpnSuspected ? `<span class="badge badge-pending">VPN সন্দেহ</span>` : ""}
+      </div>
+
       ${activationCard}
       ${adminCard}
 
-      <!-- Official Channel -->
       <div class="card" style="text-align:center;">
         <div class="card-title">📢 অফিসিয়াল চ্যানেল</div>
         <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">
@@ -215,7 +330,7 @@ async function loadHome() {
     </div>
   `;
 
-  // Admin হলে নিচের নেভে অতিরিক্ত অপশন
+  // Admin nav
   if (data.role === "admin") {
     const nav = document.querySelector(".bottom-nav");
     if (nav && !nav.querySelector('a[href="admin/index.html"]')) {
