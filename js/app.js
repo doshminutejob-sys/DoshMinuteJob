@@ -34,15 +34,30 @@ const user = tg.initDataUnsafe.user;
 
 // ===== Get start_param (Referral) =====
 function getStartParam() {
+  // Official way
   let param = tg.initDataUnsafe?.start_param || null;
+
+  // Fallback from URL
   if (!param) {
-    const urlParams = new URLSearchParams(window.location.search);
-    param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || null;
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || null;
+    } catch (e) {}
   }
-  return param ? String(param) : null;
+
+  // Another fallback
+  if (!param && window.location.hash) {
+    try {
+      const hashParams = new URLSearchParams(window.location.hash.replace("#", ""));
+      param = hashParams.get("tgWebAppStartParam") || null;
+    } catch (e) {}
+  }
+
+  return param ? String(param).trim() : null;
 }
 
 const startParam = getStartParam();
+console.log("Referral start_param:", startParam);
 
 function generateDeviceHash() {
   const str = [
@@ -145,15 +160,22 @@ async function ensureSettings() {
 }
 
 async function createReferralRecord(newUserId) {
-  if (!startParam || startParam === String(newUserId)) return;
+  if (!startParam || startParam === String(newUserId)) {
+    console.log("No valid startParam for referral");
+    return;
+  }
 
   try {
+    // Already has referral?
     const q = query(
       collection(db, "referral_history"),
       where("newUserId", "==", String(newUserId))
     );
     const existing = await getDocs(q);
-    if (!existing.empty) return;
+    if (!existing.empty) {
+      console.log("Referral already exists");
+      return;
+    }
 
     await addDoc(collection(db, "referral_history"), {
       referrerId: String(startParam),
@@ -161,8 +183,10 @@ async function createReferralRecord(newUserId) {
       status: "pending",
       createdAt: serverTimestamp()
     });
+
+    console.log("SUCCESS: Referral created →", startParam, "to", newUserId);
   } catch (e) {
-    console.error("Referral error:", e);
+    console.error("Referral create failed:", e);
   }
 }
 
@@ -172,7 +196,7 @@ async function createOrUpdateUser() {
   const deviceHash = generateDeviceHash();
   const location = await detectLocation();
 
-  // ===== MULTI ACCOUNT BLOCK (Device Hash) =====
+  // ===== MULTI ACCOUNT BLOCK =====
   if (!snap.exists()) {
     const deviceQuery = query(
       collection(db, "users"),
@@ -231,6 +255,7 @@ async function createOrUpdateUser() {
       lastActiveAt: serverTimestamp()
     });
 
+    // Create referral
     await createReferralRecord(user.id);
 
   } else {
@@ -256,6 +281,7 @@ async function createOrUpdateUser() {
       photoUrl: user.photo_url || data.photoUrl || ""
     };
 
+    // Late referral capture
     if (!data.referredBy && startParam && startParam !== String(user.id)) {
       updateData.referredBy = startParam;
       await createReferralRecord(user.id);
@@ -304,6 +330,11 @@ async function loadHome() {
 
   const countryText = (data.country && data.country !== "Unknown") ? data.country : "অজানা";
 
+  // DEBUG (পরে সরিয়ে দিও)
+  const debugText = startParam 
+    ? `🔗 Ref Param: ${startParam}` 
+    : `🔗 No start_param`;
+
   let activationCard = "";
   if (data.status !== "Active") {
     activationCard = `
@@ -334,6 +365,7 @@ async function loadHome() {
             <div class="hero-name">${data.firstName || "User"}</div>
             <div class="hero-username">@${data.username || "unknown"}</div>
             <span class="status-badge \( {statusClass}"> \){statusText}</span>
+            <div style="font-size:11px;color:#f59e0b;margin-top:4px;">${debugText}</div>
           </div>
         </div>
         <div class="balance-box">
