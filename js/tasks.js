@@ -112,12 +112,12 @@ function renderActionButtons(taskId, t, category) {
   // যদি কোড থাকে
   if (t.code && t.code.trim()) {
     return `
-      <button class="btn" onclick="window.openAndStart('\( {taskId}', ' \){t.link}', ${t.coin}, \( {t.timer || 15}, ' \){t.code}', '${category}')">
+      <button class="btn" onclick="window.openAndStart('${taskId}', '${t.link}', ${t.coin}, ${t.timer || 15}, '${t.code}', '${category}')">
         টাস্ক ওপেন করুন
       </button>
       <div id="code-area-${taskId}" style="display:none;margin-top:10px;">
         <input type="text" id="code-${taskId}" placeholder="ভেরিফিকেশন কোড লিখুন">
-        <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', \( {t.coin}, ' \){t.code}', '${category}')">
+        <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', ${t.coin}, '${t.code}', '${category}')">
           কোড সাবমিট ও ক্লেম
         </button>
       </div>
@@ -128,7 +128,7 @@ function renderActionButtons(taskId, t, category) {
   const timer = t.timer || 15;
   return `
     <button class="btn" id="btn-${taskId}"
-      onclick="window.openAndStart('\( {taskId}', ' \){t.link}', ${t.coin}, \( {timer}, '', ' \){category}')">
+      onclick="window.openAndStart('${taskId}', '${t.link}', ${t.coin}, ${timer}, '', '${category}')">
       টাস্ক ওপেন করুন
     </button>
   `;
@@ -301,7 +301,7 @@ async function renderCategoryTasks(cat) {
       html += `
         <div class="card" style="margin-bottom:12px;">
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
-            📜 ${list.name} • টাস্ক \( {currentIndex + 1}/ \){listTasks.length}
+            📜 ${list.name} • টাস্ক ${currentIndex + 1}/${listTasks.length}
           </div>
           <div style="font-weight:700;font-size:15px;margin-bottom:6px;">${currentTask.name}</div>
           <div style="font-size:14px;margin-bottom:6px;">💰 <b style="color:var(--green)">${currentTask.coin}</b> কয়েন</div>
@@ -520,3 +520,4 @@ async function giveReferralBonus(earnedCoin) {
     </div>
   `;
 });
+                                
