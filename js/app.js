@@ -115,24 +115,24 @@ function checkVpnSuspicion(ipHistory, newIP, newCountry) {
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const recent = (ipHistory || []).filter(item => now - item.time < sevenDays);
 
-  const uniqueIPs = new Set(recent.map(i => i.ip));
-  uniqueIPs.add(newIP);
-
+  // শুধু দেশগুলো দেখব
   const uniqueCountries = new Set(recent.map(i => i.country).filter(Boolean));
-  if (newCountry) uniqueCountries.add(newCountry);
+  if (newCountry && newCountry !== "Unknown") {
+    uniqueCountries.add(newCountry);
+  }
 
   let vpnScore = 0;
   let vpnSuspected = false;
 
-  if (uniqueIPs.size >= 3) {
-    vpnScore += 40;
+  // ২টা বা তার বেশি আলাদা দেশ → সন্দেহ
+  if (uniqueCountries.size >= 2) {
+    vpnScore = 60;
     vpnSuspected = true;
-  } else if (uniqueIPs.size === 2) {
-    vpnScore += 20;
   }
 
-  if (uniqueCountries.size >= 2) {
-    vpnScore += 30;
+  // ৩টা বা তার বেশি দেশ → আরও কঠোর
+  if (uniqueCountries.size >= 3) {
+    vpnScore = 100;
     vpnSuspected = true;
   }
 
@@ -364,7 +364,7 @@ async function loadHome() {
           <div>
             <div class="hero-name">${data.firstName || "User"}</div>
             <div class="hero-username">@${data.username || "unknown"}</div>
-            <span class="status-badge \( {statusClass}"> \){statusText}</span>
+            <span class="status-badge ${statusClass}">${statusText}</span>
             <div style="font-size:11px;color:#f59e0b;margin-top:4px;">${debugText}</div>
           </div>
         </div>
@@ -452,3 +452,4 @@ async function loadHome() {
     }
   }
 })();
+          
