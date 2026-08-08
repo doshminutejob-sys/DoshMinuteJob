@@ -47,36 +47,67 @@ function generateDeviceHash() {
   return "dh_" + Math.abs(hash).toString(36);
 }
 
-// ===== IP + Country Detection =====
+// ===== Improved Location Detection with Fallback =====
 async function detectLocation() {
+  // Try 1: ipapi.co
   try {
     const res = await fetch("https://ipapi.co/json/", { cache: "no-store" });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return {
-      ip: data.ip || "",
-      country: data.country_name || "Unknown",
-      countryCode: data.country_code || "",
-      city: data.city || ""
-    };
-  } catch (e) {
-    console.log("Location detect failed", e);
-    return null;
-  }
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ip && data.country_name) {
+        return {
+          ip: data.ip,
+          country: data.country_name,
+          countryCode: data.country_code || "",
+          city: data.city || ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  // Try 2: ipwho.is
+  try {
+    const res = await fetch("https://ipwho.is/", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.ip) {
+        return {
+          ip: data.ip,
+          country: data.country || "Unknown",
+          countryCode: data.country_code || "",
+          city: data.city || ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  // Try 3: geojs.io
+  try {
+    const res = await fetch("https://get.geojs.io/v1/ip/geo.json", { cache: "no-store" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ip) {
+        return {
+          ip: data.ip,
+          country: data.country || "Unknown",
+          countryCode: data.country_code || "",
+          city: data.city || ""
+        };
+      }
+    }
+  } catch (e) {}
+
+  return null;
 }
 
 function checkVpnSuspicion(ipHistory, newIP, newCountry) {
   const now = Date.now();
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
-
-  // Keep only last 7 days records
   const recent = (ipHistory || []).filter(item => now - item.time < sevenDays);
 
-  // Unique IPs in last 7 days
   const uniqueIPs = new Set(recent.map(i => i.ip));
   uniqueIPs.add(newIP);
 
-  // Unique countries
   const uniqueCountries = new Set(recent.map(i => i.country).filter(Boolean));
   if (newCountry) uniqueCountries.add(newCountry);
 
@@ -151,9 +182,9 @@ async function createOrUpdateUser() {
       paymentNumber: "",
       deviceHash: deviceHash,
       isBanned: false,
-      country: location?.country || "Unknown",
-      countryCode: location?.countryCode || "",
-      lastIP: location?.ip || "",
+      country: location ? location.country : "Unknown",
+      countryCode: location ? location.countryCode : "",
+      lastIP: location ? location.ip : "",
       ipHistory: ipHistory,
       vpnSuspected: false,
       vpnScore: 0,
@@ -186,22 +217,16 @@ async function createOrUpdateUser() {
     let updateData = {
       lastActiveAt: serverTimestamp(),
       deviceHash: deviceHash,
-      username: user.username || data.username,
-      firstName: user.first_name || data.firstName,
+      username: user.username || data.username || "",
+      firstName: user.first_name || data.firstName || "",
       photoUrl: user.photo_url || data.photoUrl || ""
     };
 
-    // Location + VPN check
     if (location && location.ip) {
       const oldHistory = data.ipHistory || [];
-      const { vpnScore, vpnSuspected, recentHistory } = checkVpnSuspicion(
-        oldHistory,
-        location.ip,
-        location.country
-      );
+      const result = checkVpnSuspicion(oldHistory, location.ip, location.country);
 
-      // Add new IP if different from last one
-      let newHistory = [...recentHistory];
+      let newHistory = [...result.recentHistory];
       if (data.lastIP !== location.ip) {
         newHistory.push({
           ip: location.ip,
@@ -210,18 +235,14 @@ async function createOrUpdateUser() {
           time: Date.now()
         });
       }
-
-      // Keep max 8 records
-      if (newHistory.length > 8) {
-        newHistory = newHistory.slice(-8);
-      }
+      if (newHistory.length > 8) newHistory = newHistory.slice(-8);
 
       updateData.country = location.country;
       updateData.countryCode = location.countryCode;
       updateData.lastIP = location.ip;
       updateData.ipHistory = newHistory;
-      updateData.vpnScore = Math.max(data.vpnScore || 0, vpnScore);
-      updateData.vpnSuspected = data.vpnSuspected || vpnSuspected;
+      updateData.vpnScore = Math.max(data.vpnScore || 0, result.vpnScore);
+      updateData.vpnSuspected = data.vpnSuspected || result.vpnSuspected;
     }
 
     await updateDoc(userRef, updateData);
@@ -235,16 +256,18 @@ async function loadHome() {
 
   const data = snap.data();
 
-  const isActive = data.status === "Active";
-  const statusClass = isActive ? "status-active" : "status-inactive";
-  const statusText = isActive ? "Active" : "Inactive";
+  // Status - safe way
+  let statusText = "Inactive";
+  let statusClass = "status-inactive";
+  if (data.status === "Active") {
+    statusText = "Active";
+    statusClass = "status-active";
+  }
 
-  const countryText = data.country && data.country !== "Unknown"
-    ? data.country
-    : "অজানা";
+  const countryText = (data.country && data.country !== "Unknown") ? data.country : "অজানা";
 
   let activationCard = "";
-  if (!isActive) {
+  if (data.status !== "Active") {
     activationCard = `
       <div class="card warning-card">
         <div class="card-title">⚠️ অ্যাকাউন্ট এক্টিভ নয়</div>
@@ -305,7 +328,7 @@ async function loadHome() {
           <div style="font-size:13px;color:var(--muted);">📍 আপনার লোকেশন</div>
           <div style="font-weight:600;margin-top:3px;">${countryText}</div>
         </div>
-        ${data.vpnSuspected ? `<span class="badge badge-pending">VPN সন্দেহ</span>` : ""}
+        ${data.vpnSuspected ? `<span class="status-badge status-inactive">VPN সন্দেহ</span>` : ""}
       </div>
 
       ${activationCard}
@@ -330,7 +353,7 @@ async function loadHome() {
     </div>
   `;
 
-  // Admin nav
+  // Admin bottom nav
   if (data.role === "admin") {
     const nav = document.querySelector(".bottom-nav");
     if (nav && !nav.querySelector('a[href="admin/index.html"]')) {
