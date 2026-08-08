@@ -40,6 +40,12 @@ async function checkAdmin() {
   }
 }
 
+function getTrafficLevel(count) {
+  if (count >= 50) return { text: "High", class: "green" };
+  if (count >= 15) return { text: "Medium", class: "yellow" };
+  return { text: "Low", class: "red" };
+}
+
 async function loadSecurity() {
   await checkAdmin();
 
@@ -47,59 +53,53 @@ async function loadSecurity() {
   const users = [];
   snap.forEach(d => users.push({ id: d.id, ...d.data() }));
 
-  // Maps for duplicates
+  // ===== Country Stats =====
+  const countryMap = {};
+  users.forEach(u => {
+    const c = u.country || "Unknown";
+    if (!countryMap[c]) countryMap[c] = 0;
+    countryMap[c]++;
+  });
+
+  const countryList = Object.entries(countryMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  // ===== Duplicate Detection =====
   const fbMap = {};
   const deviceMap = {};
   const paymentMap = {};
 
   users.forEach(u => {
-    if (u.facebookLink) {
-      fbMap[u.facebookLink] = (fbMap[u.facebookLink] || 0) + 1;
-    }
-    if (u.deviceHash) {
-      deviceMap[u.deviceHash] = (deviceMap[u.deviceHash] || 0) + 1;
-    }
-    if (u.paymentNumber) {
-      paymentMap[u.paymentNumber] = (paymentMap[u.paymentNumber] || 0) + 1;
-    }
+    if (u.facebookLink) fbMap[u.facebookLink] = (fbMap[u.facebookLink] || 0) + 1;
+    if (u.deviceHash) deviceMap[u.deviceHash] = (deviceMap[u.deviceHash] || 0) + 1;
+    if (u.paymentNumber) paymentMap[u.paymentNumber] = (paymentMap[u.paymentNumber] || 0) + 1;
   });
 
-  let duplicateFB = 0;
-  let duplicateDevice = 0;
-  let duplicatePayment = 0;
-  let suspiciousList = [];
+  let duplicateFB = 0, duplicateDevice = 0, duplicatePayment = 0;
+  const seenFB = new Set(), seenDevice = new Set(), seenPayment = new Set();
 
-  const seenFB = new Set();
-  const seenDevice = new Set();
-  const seenPayment = new Set();
+  // ===== Suspicious List =====
+  const suspiciousList = [];
 
   users.forEach(u => {
     const issues = [];
 
     if (u.facebookLink && fbMap[u.facebookLink] > 1) {
       issues.push("Duplicate Facebook");
-      if (!seenFB.has(u.facebookLink)) {
-        duplicateFB++;
-        seenFB.add(u.facebookLink);
-      }
+      if (!seenFB.has(u.facebookLink)) { duplicateFB++; seenFB.add(u.facebookLink); }
     }
-
     if (u.deviceHash && deviceMap[u.deviceHash] > 1) {
       issues.push("Duplicate Device");
-      if (!seenDevice.has(u.deviceHash)) {
-        duplicateDevice++;
-        seenDevice.add(u.deviceHash);
-      }
+      if (!seenDevice.has(u.deviceHash)) { duplicateDevice++; seenDevice.add(u.deviceHash); }
     }
-
     if (u.paymentNumber && paymentMap[u.paymentNumber] > 1) {
       issues.push("Duplicate Payment");
-      if (!seenPayment.has(u.paymentNumber)) {
-        duplicatePayment++;
-        seenPayment.add(u.paymentNumber);
-      }
+      if (!seenPayment.has(u.paymentNumber)) { duplicatePayment++; seenPayment.add(u.paymentNumber); }
     }
-
+    if (u.vpnSuspected || (u.vpnScore || 0) >= 30) {
+      issues.push("VPN Suspected (Score: " + (u.vpnScore || 0) + ")");
+    }
     if (u.isBanned) {
       issues.push("Already Banned");
     }
@@ -109,10 +109,35 @@ async function loadSecurity() {
     }
   });
 
-  let html = "";
+  // Sort: VPN first, then others
+  suspiciousList.sort((a, b) => (b.vpnScore || 0) - (a.vpnScore || 0));
 
+  // ===== Country HTML =====
+  let countryHtml = "";
+  countryList.forEach(c => {
+    const level = getTrafficLevel(c.count);
+    countryHtml += `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.05);">
+        <div>
+          <div style="font-weight:600;">${c.name}</div>
+          <div style="font-size:11px;color:var(--muted);">${c.count} জন ইউজার</div>
+        </div>
+        <span class="badge ${level.class === 'green' ? 'badge-active' : level.class === 'yellow' ? 'badge-pending' : 'badge-rejected'}">
+          ${level.text}
+        </span>
+      </div>
+    `;
+  });
+
+  // ===== Suspicious HTML =====
+  let suspiciousHtml = "";
   suspiciousList.forEach(u => {
-    html += `
+    const ipHistoryText = (u.ipHistory || [])
+      .slice(-4)
+      .map(h => h.country + " (" + (h.ip || "").slice(0, 12) + ")")
+      .join(" → ") || "নেই";
+
+    suspiciousHtml += `
       <div class="item-card">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
           <div>
@@ -134,9 +159,12 @@ async function loadSecurity() {
         </div>
 
         <div style="font-size:13px;line-height:1.6;color:var(--muted);margin-bottom:12px;">
-          \( {u.facebookLink ? `<div>📘 <a href=" \){u.facebookLink}" target="_blank" style="color:var(--green);">${u.facebookLink}</a></div>` : ""}
-          ${u.deviceHash ? `<div>📱 Device: ${u.deviceHash}</div>` : ""}
+          <div>📍 দেশ: <b>${u.country || "Unknown"}</b></div>
+          <div>📡 VPN Score: <b>${u.vpnScore || 0}</b></div>
+          <div>📱 Device: ${u.deviceHash || "—"}</div>
+          \( {u.facebookLink ? `<div>📘 <a href=" \){u.facebookLink}" target="_blank" style="color:var(--green);">Facebook</a></div>` : ""}
           ${u.paymentNumber ? `<div>💳 ${u.paymentMethod || ""}: ${u.paymentNumber}</div>` : ""}
+          <div style="margin-top:6px;font-size:11px;">IP History: ${ipHistoryText}</div>
           <div>💰 কয়েন: ${Number(u.coin || 0).toLocaleString()}</div>
         </div>
 
@@ -159,7 +187,7 @@ async function loadSecurity() {
     <div class="admin-page">
       <div class="admin-header">
         <h1>🛡 সিকিউরিটি সেন্টার</h1>
-        <p>ফ্রড ও মাল্টি-অ্যাকাউন্ট ডিটেকশন</p>
+        <p>কান্ট্রি ট্রাফিক + VPN + ফ্রড ডিটেকশন</p>
       </div>
 
       <div class="stats-grid">
@@ -176,17 +204,25 @@ async function loadSecurity() {
           <div class="stat-value yellow">${duplicateDevice}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Duplicate Payment</div>
-          <div class="stat-value yellow">${duplicatePayment}</div>
+          <div class="stat-label">VPN সন্দেহ</div>
+          <div class="stat-value red">${users.filter(u => u.vpnSuspected || (u.vpnScore || 0) >= 30).length}</div>
         </div>
       </div>
 
-      <div style="font-size:15px;font-weight:700;margin:8px 0 12px;">
+      <!-- Country Traffic -->
+      <div class="section-card">
+        <h2>🌍 দেশ অনুযায়ী ট্রাফিক</h2>
+        <div style="max-height:260px;overflow-y:auto;">
+          ${countryHtml || `<div style="color:var(--muted);font-size:13px;">এখনো ডেটা নেই</div>`}
+        </div>
+      </div>
+
+      <div style="font-size:15px;font-weight:700;margin:18px 0 12px;">
         🚨 সন্দেহজনক অ্যাকাউন্ট (${suspiciousList.length})
       </div>
 
-      <div id="securityList">
-        ${html || `
+      <div>
+        ${suspiciousHtml || `
           <div class="section-card" style="text-align:center;color:var(--muted);">
             ✅ কোনো সন্দেহজনক অ্যাকাউন্ট পাওয়া যায়নি
           </div>
