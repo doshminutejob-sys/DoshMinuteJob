@@ -2,7 +2,6 @@ import { db } from "./firebase.js";
 import {
   doc,
   getDoc,
-  updateDoc,
   collection,
   addDoc,
   getDocs,
@@ -24,220 +23,215 @@ tg.setHeaderColor("#0B1220");
 tg.setBackgroundColor("#0B1220");
 
 const user = tg.initDataUnsafe.user;
+let userData = null;
+let settings = {};
 
 async function loadWithdraw() {
-  const userRef = doc(db, "users", String(user.id));
-  const userSnap = await getDoc(userRef);
-
+  const userSnap = await getDoc(doc(db, "users", String(user.id)));
   if (!userSnap.exists()) {
     location.href = "index.html";
     return;
   }
+  userData = userSnap.data();
 
-  const data = userSnap.data();
-
-  if (data.isBanned) {
+  if (userData.isBanned) {
     document.getElementById("app").innerHTML = `
       <div class="loader-box">
         <div class="logo-circle">🚫</div>
         <h1>অ্যাকাউন্ট ব্যান</h1>
-        <p class="error">আপনার অ্যাকাউন্ট স্থগিত</p>
       </div>
     `;
     return;
   }
 
-  await updateDoc(userRef, { lastActiveAt: serverTimestamp() });
-
-  // Settings
   const settingsSnap = await getDoc(doc(db, "system_settings", "main"));
-  const settings = settingsSnap.exists() ? settingsSnap.data() : {
+  settings = settingsSnap.exists() ? settingsSnap.data() : {
     withdrawEnabled: false,
     minWithdraw: 1000,
     requiredActiveReferrals: 15
   };
 
+  // History
+  const q = query(
+    collection(db, "withdraw_requests"),
+    where("userId", "==", String(user.id))
+  );
+  const histSnap = await getDocs(q);
+  let historyHtml = "";
+  histSnap.forEach(d => {
+    const w = d.data();
+    let badge = "⏳ Pending";
+    if (w.status === "approved") badge = "✅ Approved";
+    if (w.status === "rejected") badge = "❌ Rejected";
+
+    const feeText = w.fee ? ` (ফি: ${w.fee})` : "";
+    historyHtml += `
+      <div class="card" style="margin-bottom:10px;padding:12px;">
+        <div style="font-weight:700;">💰 \( {w.coin} কয়েন \){feeText}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:4px;">
+          ${w.paymentMethod} • ${w.paymentNumber}<br>
+          ${badge}
+        </div>
+      </div>
+    `;
+  });
+
+  const canWithdraw = settings.withdrawEnabled &&
+    userData.status === "Active" &&
+    (userData.coin || 0) >= (settings.minWithdraw || 1000) &&
+    (userData.activeReferrals || 0) >= (settings.requiredActiveReferrals || 15);
+
+  document.getElementById("app").innerHTML = `
+    <div class="page">
+      <div class="hero" style="padding:16px;">
+        <div style="font-size:20px;font-weight:800;margin-bottom:4px;">💰 উইথড্র</div>
+        <div style="font-size:13px;color:var(--muted);">কয়েন উইথড্র করুন</div>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <div class="stat-value">${Number(userData.coin || 0).toLocaleString()}</div>
+          <div class="stat-label">ব্যালেন্স</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">${userData.activeReferrals || 0}</div>
+          <div class="stat-label">একটিভ রেফার</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value">${settings.minWithdraw || 1000}</div>
+          <div class="stat-label">মিনিমাম</div>
+        </div>
+      </div>
+
+      ${!settings.withdrawEnabled ? `
+        <div class="card warning-card">
+          <div class="card-title">⚠️ উইথড্র বন্ধ আছে</div>
+          <p>এখন উইথড্র সিস্টেম বন্ধ রাখা হয়েছে।</p>
+        </div>
+      ` : ""}
+
+      ${userData.status !== "Active" ? `
+        <div class="card warning-card">
+          <div class="card-title">⚠️ অ্যাকাউন্ট এক্টিভ নয়</div>
+          <p>উইথড্র করতে আগে অ্যাকাউন্ট এক্টিভ করুন।</p>
+          <button class="btn" onclick="location.href='profile.html'">প্রোফাইলে যান</button>
+        </div>
+      ` : ""}
+
+      <div class="card">
+        <div class="card-title">উইথড্র রিকোয়েস্ট</div>
+
+        <label style="font-size:12px;color:var(--muted);">পেমেন্ট মেথড</label>
+        <select id="payMethod" style="margin-bottom:10px;">
+          <option value="">সিলেক্ট করুন</option>
+          <option value="Bkash">Bkash (ফি নেই)</option>
+          <option value="Nagad">Nagad (ফি নেই)</option>
+          <option value="Bybit">Bybit (USDT • ১% ফি)</option>
+          <option value="Binance">Binance (USDT • ১% ফি)</option>
+          <option value="Bitget">Bitget (USDT • ১% ফি)</option>
+        </select>
+
+        <label style="font-size:12px;color:var(--muted);">পেমেন্ট নাম্বার / UID / অ্যাড্রেস</label>
+        <input id="payNumber" placeholder="নাম্বার বা এক্সচেঞ্জ UID/অ্যাড্রেস" style="margin-bottom:10px;">
+
+        <div id="feeInfo" style="font-size:12px;color:var(--muted);margin-bottom:10px;display:none;"></div>
+
+        <button class="btn" id="submitBtn" ${canWithdraw ? "" : "disabled style='opacity:0.5'"}>
+          উইথড্র রিকোয়েস্ট পাঠাও
+        </button>
+
+        <p style="font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5;">
+          • মিনিমাম: ${settings.minWithdraw || 1000} কয়েন<br>
+          • প্রয়োজনীয় Active Referral: ${settings.requiredActiveReferrals || 15}<br>
+          • Bkash/Nagad → ফি নেই<br>
+          • Bybit/Binance/Bitget → শুধু USDT, ১% ফি
+        </p>
+      </div>
+
+      <div style="font-size:15px;font-weight:700;margin:16px 0 10px;">ইতিহাস</div>
+      ${historyHtml || `<div class="card" style="text-align:center;color:var(--muted);">কোনো রিকোয়েস্ট নেই</div>`}
+    </div>
+  `;
+
+  // Fee info on method change
+  document.getElementById("payMethod").onchange = function() {
+    const method = this.value;
+    const feeBox = document.getElementById("feeInfo");
+    const coin = userData.coin || 0;
+
+    if (["Bybit", "Binance", "Bitget"].includes(method)) {
+      const fee = Math.ceil(coin * 0.01);
+      const receive = coin - fee;
+      feeBox.style.display = "block";
+      feeBox.innerHTML = `১% ফি: <b>\( {fee}</b> কয়েন • আপনি পাবেন: <b> \){receive}</b> কয়েন (USDT)`;
+    } else if (method) {
+      feeBox.style.display = "block";
+      feeBox.innerHTML = `ফি নেই • সম্পূর্ণ <b>${coin}</b> কয়েন পাবেন`;
+    } else {
+      feeBox.style.display = "none";
+    }
+  };
+
+  document.getElementById("submitBtn").onclick = submitWithdraw;
+}
+
+async function submitWithdraw() {
+  if (!settings.withdrawEnabled) return tg.showAlert("উইথড্র এখন বন্ধ আছে");
+  if (userData.status !== "Active") return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
+
   const minWithdraw = settings.minWithdraw || 1000;
   const requiredRefs = settings.requiredActiveReferrals || 15;
-  const withdrawEnabled = settings.withdrawEnabled === true;
 
-  // Check pending withdraw
+  if ((userData.coin || 0) < minWithdraw) {
+    return tg.showAlert("মিনিমাম " + minWithdraw + " কয়েন লাগবে");
+  }
+  if ((userData.activeReferrals || 0) < requiredRefs) {
+    return tg.showAlert("কমপক্ষে " + requiredRefs + "টি Active Referral লাগবে");
+  }
+
+  const method = document.getElementById("payMethod").value;
+  const number = document.getElementById("payNumber").value.trim();
+
+  if (!method || !number) {
+    return tg.showAlert("পেমেন্ট মেথড ও নাম্বার/অ্যাড্রেস দিন");
+  }
+
+  // Already pending?
   const pendingQ = query(
     collection(db, "withdraw_requests"),
     where("userId", "==", String(user.id)),
     where("status", "==", "pending")
   );
   const pendingSnap = await getDocs(pendingQ);
-  const hasPending = !pendingSnap.empty;
+  if (!pendingSnap.empty) {
+    return tg.showAlert("আপনার ইতিমধ্যে একটি Pending রিকোয়েস্ট আছে");
+  }
 
-  // History
-  const histQ = query(
-    collection(db, "withdraw_requests"),
-    where("userId", "==", String(user.id))
-  );
-  const histSnap = await getDocs(histQ);
+  const coin = userData.coin || 0;
+  const isCrypto = ["Bybit", "Binance", "Bitget"].includes(method);
+  const fee = isCrypto ? Math.ceil(coin * 0.01) : 0;
+  const receiveAmount = coin - fee;
 
-  let historyHtml = "";
-  histSnap.forEach(item => {
-    const w = item.data();
-    let badge = `<span class="status-badge status-inactive">Pending</span>`;
-    if (w.status === "approved") badge = `<span class="status-badge status-active">Approved</span>`;
-    if (w.status === "rejected") badge = `<span class="status-badge" style="background:rgba(255,77,109,0.15);color:var(--red);">Rejected</span>`;
+  try {
+    await addDoc(collection(db, "withdraw_requests"), {
+      userId: String(user.id),
+      username: user.username || "",
+      firstName: user.first_name || "",
+      coin: coin,
+      fee: fee,
+      receiveAmount: receiveAmount,
+      paymentMethod: method,
+      paymentNumber: number,
+      facebookLink: userData.facebookLink || "",
+      activeReferrals: userData.activeReferrals || 0,
+      status: "pending",
+      createdAt: serverTimestamp()
+    });
 
-    const date = w.createdAt?.toDate
-      ? w.createdAt.toDate().toLocaleDateString("bn-BD")
-      : "—";
-
-    historyHtml += `
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <div style="font-size:18px;font-weight:800;color:var(--green);">💰 ${Number(w.coin).toLocaleString()}</div>
-          ${badge}
-        </div>
-        <div style="font-size:12px;color:var(--muted);">
-          ${w.paymentMethod || "—"} • ${w.paymentNumber || "—"}<br>
-          ${date}
-        </div>
-      </div>
-    `;
-  });
-
-  // Requirements check
-  const canWithdraw =
-    withdrawEnabled &&
-    data.status === "Active" &&
-    (data.coin || 0) >= minWithdraw &&
-    (data.activeReferrals || 0) >= requiredRefs &&
-    !hasPending &&
-    data.paymentMethod &&
-    data.paymentNumber;
-
-  const reqHtml = `
-    <div style="font-size:13px;line-height:1.9;">
-      <div style="display:flex;justify-content:space-between;">
-        <span>উইথড্র সিস্টেম</span>
-        <span style="color:${withdrawEnabled ? 'var(--green)' : 'var(--red)'}">
-          ${withdrawEnabled ? '✅ চালু' : '❌ বন্ধ'}
-        </span>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span>অ্যাকাউন্ট স্ট্যাটাস</span>
-        <span style="color:${data.status === 'Active' ? 'var(--green)' : 'var(--yellow)'}">
-          ${data.status === 'Active' ? '✅ Active' : '⚠️ Inactive'}
-        </span>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span>মিনিমাম কয়েন (${minWithdraw})</span>
-        <span style="color:${(data.coin || 0) >= minWithdraw ? 'var(--green)' : 'var(--red)'}">
-          ${(data.coin || 0) >= minWithdraw ? '✅' : '❌'} ${Number(data.coin || 0).toLocaleString()}
-        </span>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span>একটিভ রেফার (${requiredRefs})</span>
-        <span style="color:${(data.activeReferrals || 0) >= requiredRefs ? 'var(--green)' : 'var(--red)'}">
-          ${(data.activeReferrals || 0) >= requiredRefs ? '✅' : '❌'} ${data.activeReferrals || 0}
-        </span>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span>পেন্ডিং রিকোয়েস্ট নেই</span>
-        <span style="color:${!hasPending ? 'var(--green)' : 'var(--red)'}">
-          ${!hasPending ? '✅' : '❌ আছে'}
-        </span>
-      </div>
-      <div style="display:flex;justify-content:space-between;">
-        <span>পেমেন্ট তথ্য</span>
-        <span style="color:${data.paymentMethod && data.paymentNumber ? 'var(--green)' : 'var(--red)'}">
-          ${data.paymentMethod && data.paymentNumber ? '✅ সেভ আছে' : '❌ নেই'}
-        </span>
-      </div>
-    </div>
-  `;
-
-  document.getElementById("app").innerHTML = `
-    <div class="page">
-      <div class="hero">
-        <div class="balance-box" style="margin:0;">
-          <div class="balance-label">উপলব্ধ ব্যালেন্স</div>
-          <div class="balance-amount">💰 ${Number(data.coin || 0).toLocaleString()}</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-title">📋 উইথড্র শর্তসমূহ</div>
-        ${reqHtml}
-      </div>
-
-      ${canWithdraw ? `
-        <div class="card">
-          <div class="card-title">💸 উইথড্র রিকোয়েস্ট</div>
-          <p style="font-size:13px;color:var(--muted);margin-bottom:8px;">
-            পেমেন্ট: <b>${data.paymentMethod}</b> • ${data.paymentNumber}
-          </p>
-          <p style="font-size:13px;color:var(--muted);margin-bottom:14px;">
-            আপনি রিকোয়েস্ট করবেন: <b style="color:var(--green)">${Number(data.coin).toLocaleString()}</b> কয়েন
-          </p>
-          <button class="btn" id="withdrawBtn">সম্পূর্ণ উইথড্র রিকোয়েস্ট করুন</button>
-        </div>
-      ` : `
-        <div class="card warning-card">
-          <div class="card-title">⚠️ এখন উইথড্র করা যাবে না</div>
-          <p>উপরের সব শর্ত পূরণ করতে হবে। ${!data.paymentMethod ? 'প্রথমে প্রোফাইল থেকে পেমেন্ট তথ্য সেভ করুন।' : ''}</p>
-          ${!data.paymentMethod || !data.paymentNumber ? `
-            <button class="btn" onclick="location.href='profile.html'">প্রোফাইলে যান</button>
-          ` : ""}
-        </div>
-      `}
-
-      <div style="font-size:15px;font-weight:700;margin:18px 0 10px;">📜 উইথড্র হিস্টোরি</div>
-      <div>
-        ${historyHtml || `
-          <div class="card" style="text-align:center;color:var(--muted);font-size:13px;">
-            এখনো কোনো উইথড্র রিকোয়েস্ট নেই
-          </div>
-        `}
-      </div>
-    </div>
-  `;
-
-  const btn = document.getElementById("withdrawBtn");
-  if (btn) {
-    btn.onclick = async () => {
-      if (!canWithdraw) return;
-
-      btn.disabled = true;
-      btn.innerText = "সাবমিট হচ্ছে...";
-
-      try {
-        // Double check pending
-        const check = await getDocs(pendingQ);
-        if (!check.empty) {
-          tg.showAlert("আপনার ইতিমধ্যে একটি পেন্ডিং রিকোয়েস্ট আছে");
-          loadWithdraw();
-          return;
-        }
-
-        await addDoc(collection(db, "withdraw_requests"), {
-          userId: String(user.id),
-          username: data.username || "",
-          firstName: data.firstName || "",
-          coin: data.coin || 0,
-          paymentMethod: data.paymentMethod,
-          paymentNumber: data.paymentNumber,
-          facebookLink: data.facebookLink || "",
-          activeReferrals: data.activeReferrals || 0,
-          status: "pending",
-          createdAt: serverTimestamp()
-        });
-
-        tg.showAlert("✅ উইথড্র রিকোয়েস্ট সফলভাবে সাবমিট হয়েছে!");
-        loadWithdraw();
-      } catch (e) {
-        console.error(e);
-        tg.showAlert("সমস্যা: " + e.message);
-        btn.disabled = false;
-        btn.innerText = "সম্পূর্ণ উইথড্র রিকোয়েস্ট করুন";
-      }
-    };
+    tg.showAlert("উইথড্র রিকোয়েস্ট সাবমিট হয়েছে!");
+    loadWithdraw();
+  } catch (e) {
+    tg.showAlert("সমস্যা: " + e.message);
   }
 }
 
