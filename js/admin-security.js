@@ -128,7 +128,7 @@ async function loadSecurity() {
                 <div style="font-weight:600;">${c.name}</div>
                 <div style="font-size:11px;color:var(--muted);">${c.count} জন</div>
               </div>
-              <span class="badge \( {level.cls}"> \){level.text}</span>
+              <span class="badge ${level.cls}">${level.text}</span>
             </div>
           `;
         }).join("");
@@ -156,7 +156,7 @@ async function loadSecurity() {
             </div>
 
             <div style="font-size:11px;margin-bottom:8px;">
-              \( {u.issues.map(i => `<span class="badge badge-rejected" style="margin:2px 3px 2px 0;"> \){i}</span>`).join("")}
+              ${u.issues.map(i => `<span class="badge badge-rejected" style="margin:2px 3px 2px 0;">${i}</span>`).join("")}
             </div>
 
             <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px;">
@@ -276,3 +276,4 @@ window.unbanUser = async function(uid) {
 };
 
 loadSecurity();
+      
