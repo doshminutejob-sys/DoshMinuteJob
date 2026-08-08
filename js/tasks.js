@@ -27,7 +27,7 @@ tg.setBackgroundColor("#0B1220");
 const user = tg.initDataUnsafe.user;
 let userData = null;
 let userClaims = {};
-let currentCategory = null; // null = show category list
+let currentCategory = null;
 
 async function getUser() {
   const snap = await getDoc(doc(db, "users", String(user.id)));
@@ -86,6 +86,9 @@ function emptyCard(msg) {
 }
 
 function taskCard(t, actionHtml, badge) {
+  const completed = t.completedCount || 0;
+  const limitText = t.limit ? completed + " / " + t.limit : completed + "";
+
   return `
     <div class="card" style="margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
@@ -94,7 +97,7 @@ function taskCard(t, actionHtml, badge) {
       </div>
       <div style="font-size:14px;margin-bottom:6px;">💰 <b style="color:var(--green)">${t.coin}</b> কয়েন</div>
       <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">
-        \( {t.completedCount || 0} \){t.limit ? " / " + t.limit : ""} জন সম্পন্ন
+        ${limitText} জন সম্পন্ন
       </div>
       ${actionHtml}
     </div>
@@ -106,27 +109,32 @@ function renderActionButtons(taskId, t, category) {
     return `<button class="btn" disabled style="opacity:0.5">আগে অ্যাকাউন্ট এক্টিভ করুন</button>`;
   }
 
+  // যদি কোড থাকে
   if (t.code && t.code.trim()) {
     return `
-      <button class="btn" onclick="window.openLink('${t.link}')">টাস্ক ওপেন করুন</button>
-      <input type="text" id="code-${taskId}" placeholder="ভেরিফিকেশন কোড" style="margin-top:10px;">
-      <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', \( {t.coin}, ' \){t.code}', '${category}')">
-        কোড সাবমিট ও ক্লেম
+      <button class="btn" onclick="window.openAndStart('\( {taskId}', ' \){t.link}', ${t.coin}, \( {t.timer || 15}, ' \){t.code}', '${category}')">
+        টাস্ক ওপেন করুন
       </button>
+      <div id="code-area-${taskId}" style="display:none;margin-top:10px;">
+        <input type="text" id="code-${taskId}" placeholder="ভেরিফিকেশন কোড লিখুন">
+        <button class="btn" style="margin-top:8px;" onclick="window.submitCode('${taskId}', \( {t.coin}, ' \){t.code}', '${category}')">
+          কোড সাবমিট ও ক্লেম
+        </button>
+      </div>
     `;
   }
 
+  // সাধারণ টাইমার টাস্ক
   const timer = t.timer || 15;
   return `
-    <button class="btn" onclick="window.openLink('${t.link}')">টাস্ক ওপেন করুন</button>
-    <button class="btn" id="claim-${taskId}" style="margin-top:8px;"
-      onclick="window.startTimer('${taskId}', ${t.coin}, \( {timer}, ' \){category}')">
-      টাইমার শুরু করুন (${timer}s)
+    <button class="btn" id="btn-${taskId}"
+      onclick="window.openAndStart('\( {taskId}', ' \){t.link}', ${t.coin}, \( {timer}, '', ' \){category}')">
+      টাস্ক ওপেন করুন
     </button>
   `;
 }
 
-// ==================== CATEGORY LIST VIEW ====================
+// ==================== CATEGORY LIST ====================
 function showCategoryList() {
   currentCategory = null;
 
@@ -150,7 +158,7 @@ function showCategoryList() {
           <div style="font-size:28px;">⭐</div>
           <div>
             <div style="font-weight:700;font-size:16px;">Permanent Tasks</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:3px;">একবারের টাস্ক • জীবনে মাত্র একবার</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px;">একবারের টাস্ক</div>
           </div>
         </div>
       </div>
@@ -160,7 +168,7 @@ function showCategoryList() {
           <div style="font-size:28px;">🔄</div>
           <div>
             <div style="font-weight:700;font-size:16px;">Cooldown Tasks</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:3px;">প্রতিটি টাস্কের আলাদা কুলডাউন</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px;">আলাদা কুলডাউন</div>
           </div>
         </div>
       </div>
@@ -170,7 +178,7 @@ function showCategoryList() {
           <div style="font-size:28px;">📜</div>
           <div>
             <div style="font-weight:700;font-size:16px;">Sequential Lists</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:3px;">একটার পর একটা • লিস্ট কুলডাউন</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px;">একটার পর একটা</div>
           </div>
         </div>
       </div>
@@ -180,7 +188,7 @@ function showCategoryList() {
           <div style="font-size:28px;">⏳</div>
           <div>
             <div style="font-weight:700;font-size:16px;">Temporary Tasks</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:3px;">মেয়াদোত্তীর্ণ হয়ে যাবে</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px;">মেয়াদোত্তীর্ণ</div>
           </div>
         </div>
       </div>
@@ -188,7 +196,6 @@ function showCategoryList() {
   `;
 }
 
-// ==================== OPEN SPECIFIC CATEGORY ====================
 window.openCategory = async function(cat) {
   currentCategory = cat;
   await renderCategoryTasks(cat);
@@ -268,7 +275,6 @@ async function renderCategoryTasks(cat) {
       listTasks.sort((a, b) => (a.order || 0) - (b.order || 0));
       if (listTasks.length === 0) continue;
 
-      // Find current task for user
       let currentTask = null;
       let currentIndex = 0;
       for (let i = 0; i < listTasks.length; i++) {
@@ -330,15 +336,26 @@ window.backToCategories = function() {
   showCategoryList();
 };
 
-// ==================== CLAIM LOGIC ====================
-window.openLink = function(link) {
-  if (link) window.open(link, "_blank");
-};
+// ==================== NEW FLOW: Open + Auto Timer ====================
+window.openAndStart = function(taskId, link, coin, seconds, code, category) {
+  if (userData.status !== "Active") {
+    return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
+  }
 
-window.startTimer = function(taskId, coin, seconds, category) {
-  if (userData.status !== "Active") return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
+  // লিংক ওপেন করো
+  if (link) {
+    window.open(link, "_blank");
+  }
 
-  const btn = document.getElementById("claim-" + taskId);
+  // যদি কোড থাকে → কোড ইনপুট দেখাও
+  if (code && code.trim()) {
+    const area = document.getElementById("code-area-" + taskId);
+    if (area) area.style.display = "block";
+    return;
+  }
+
+  // সাধারণ টাইমার টাস্ক
+  const btn = document.getElementById("btn-" + taskId);
   if (!btn || btn.disabled) return;
 
   btn.disabled = true;
@@ -347,42 +364,58 @@ window.startTimer = function(taskId, coin, seconds, category) {
 
   const interval = setInterval(() => {
     left--;
-    btn.innerText = "অপেক্ষা করুন " + left + "s...";
-    if (left <= 0) clearInterval(interval);
+    if (left > 0) {
+      btn.innerText = "অপেক্ষা করুন " + left + "s...";
+    } else {
+      clearInterval(interval);
+    }
   }, 1000);
 
   setTimeout(async () => {
     try {
       await claimTask(taskId, coin, category);
       tg.showAlert("✅ " + coin + " কয়েন যোগ হয়েছে!");
-      if (currentCategory) renderCategoryTasks(currentCategory);
-      else showCategoryList();
+      if (currentCategory) {
+        await loadClaims();
+        renderCategoryTasks(currentCategory);
+      }
     } catch (e) {
       tg.showAlert("সমস্যা: " + e.message);
       btn.disabled = false;
-      btn.innerText = "আবার চেষ্টা করুন";
+      btn.innerText = "টাস্ক ওপেন করুন";
     }
   }, seconds * 1000);
 };
 
 window.submitCode = async function(taskId, coin, correctCode, category) {
-  if (userData.status !== "Active") return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
+  if (userData.status !== "Active") {
+    return tg.showAlert("আগে অ্যাকাউন্ট এক্টিভ করুন");
+  }
 
   const input = document.getElementById("code-" + taskId);
   const code = (input?.value || "").trim();
+
   if (!code) return tg.showAlert("কোড লিখুন");
   if (code !== correctCode) return tg.showAlert("ভুল কোড!");
 
   try {
     await claimTask(taskId, coin, category);
     tg.showAlert("✅ " + coin + " কয়েন যোগ হয়েছে!");
-    if (currentCategory) renderCategoryTasks(currentCategory);
+    if (currentCategory) {
+      await loadClaims();
+      renderCategoryTasks(currentCategory);
+    }
   } catch (e) {
     tg.showAlert("সমস্যা: " + e.message);
   }
 };
 
 async function claimTask(taskId, coin, category) {
+  // Already claimed check
+  if (userClaims[taskId]) {
+    throw new Error("এই টাস্ক ইতিমধ্যে সম্পন্ন হয়েছে");
+  }
+
   await addDoc(collection(db, "task_claims"), {
     userId: String(user.id),
     taskId,
@@ -404,7 +437,9 @@ async function claimTask(taskId, coin, category) {
       temporary: "tasks_temporary"
     }[category];
     if (col) {
-      try { await updateDoc(doc(db, col, taskId), { completedCount: increment(1) }); } catch (e) {}
+      try {
+        await updateDoc(doc(db, col, taskId), { completedCount: increment(1) });
+      } catch (e) {}
     }
   }
 
