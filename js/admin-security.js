@@ -41,11 +41,10 @@ async function checkAdmin() {
     }
     return true;
   } catch (e) {
-    console.error("Admin check error:", e);
     document.getElementById("app").innerHTML = `
       <div class="loader-box">
         <h1>সমস্যা</h1>
-        <p class="error">অ্যাডমিন চেক করতে ব্যর্থ: ${e.message}</p>
+        <p class="error">${e.message}</p>
       </div>
     `;
     return false;
@@ -65,9 +64,7 @@ async function loadSecurity() {
   try {
     const snap = await getDocs(collection(db, "users"));
     const users = [];
-    snap.forEach(d => {
-      users.push({ id: d.id, ...d.data() });
-    });
+    snap.forEach(d => users.push({ id: d.id, ...d.data() }));
 
     // Country Stats
     const countryMap = {};
@@ -80,24 +77,22 @@ async function loadSecurity() {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Duplicates
-    const fbMap = {}, deviceMap = {}, paymentMap = {};
+    // Duplicates + VPN
+    const fbMap = {}, deviceMap = {};
     users.forEach(u => {
       if (u.facebookLink) fbMap[u.facebookLink] = (fbMap[u.facebookLink] || 0) + 1;
       if (u.deviceHash) deviceMap[u.deviceHash] = (deviceMap[u.deviceHash] || 0) + 1;
-      if (u.paymentNumber) paymentMap[u.paymentNumber] = (paymentMap[u.paymentNumber] || 0) + 1;
     });
 
     let duplicateFB = 0, duplicateDevice = 0;
     const seenFB = new Set(), seenDevice = new Set();
-
     const suspiciousList = [];
 
     users.forEach(u => {
       const issues = [];
 
       if (u.facebookLink && fbMap[u.facebookLink] > 1) {
-        issues.push("Duplicate Facebook");
+        issues.push("Duplicate FB");
         if (!seenFB.has(u.facebookLink)) {
           duplicateFB++;
           seenFB.add(u.facebookLink);
@@ -111,11 +106,9 @@ async function loadSecurity() {
         }
       }
       if (u.vpnSuspected || (u.vpnScore || 0) >= 30) {
-        issues.push("VPN Score: " + (u.vpnScore || 0));
+        issues.push("VPN: " + (u.vpnScore || 0));
       }
-      if (u.isBanned) {
-        issues.push("Banned");
-      }
+      if (u.isBanned) issues.push("Banned");
 
       if (issues.length > 0) {
         suspiciousList.push({ ...u, issues });
@@ -125,23 +118,20 @@ async function loadSecurity() {
     suspiciousList.sort((a, b) => (b.vpnScore || 0) - (a.vpnScore || 0));
 
     // Country HTML
-    let countryHtml = "";
-    if (countryList.length === 0) {
-      countryHtml = `<div style="color:var(--muted);font-size:13px;padding:10px 0;">এখনো কোনো দেশের ডেটা নেই</div>`;
-    } else {
-      countryList.forEach(c => {
-        const level = getTrafficLevel(c.count);
-        countryHtml += `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
-            <div>
-              <div style="font-weight:600;">${c.name}</div>
-              <div style="font-size:11px;color:var(--muted);">${c.count} জন</div>
+    let countryHtml = countryList.length === 0
+      ? `<div style="color:var(--muted);font-size:13px;">এখনো ডেটা নেই</div>`
+      : countryList.map(c => {
+          const level = getTrafficLevel(c.count);
+          return `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.06);">
+              <div>
+                <div style="font-weight:600;">${c.name}</div>
+                <div style="font-size:11px;color:var(--muted);">${c.count} জন</div>
+              </div>
+              <span class="badge \( {level.cls}"> \){level.text}</span>
             </div>
-            <span class="badge \( {level.cls}"> \){level.text}</span>
-          </div>
-        `;
-      });
-    }
+          `;
+        }).join("");
 
     // Suspicious HTML
     let suspiciousHtml = "";
@@ -160,7 +150,9 @@ async function loadSecurity() {
                 <div style="font-weight:700;">👤 ${u.firstName || "User"}</div>
                 <div style="font-size:12px;color:var(--muted);">@${u.username || "—"} • ${u.telegramId}</div>
               </div>
-              ${u.isBanned ? `<span class="badge badge-rejected">Banned</span>` : `<span class="badge badge-pending">Suspicious</span>`}
+              ${u.isBanned
+                ? `<span class="badge badge-rejected">Banned</span>`
+                : `<span class="badge badge-pending">Suspicious</span>`}
             </div>
 
             <div style="font-size:11px;margin-bottom:8px;">
@@ -209,7 +201,7 @@ async function loadSecurity() {
           </div>
           <div class="stat-card">
             <div class="stat-label">VPN সন্দেহ</div>
-            <div class="stat-value red">${users.filter(u => u.vpnSuspected || (u.vpnScore||0) >= 30).length}</div>
+            <div class="stat-value red">${users.filter(u => u.vpnSuspected || (u.vpnScore || 0) >= 30).length}</div>
           </div>
         </div>
 
