@@ -28,9 +28,28 @@ async function loadPartners() {
     location.href = "index.html";
     return;
   }
+
   const me = meSnap.data();
 
-  // All partners
+  // ===== শুধু Partner বা Admin দেখতে পারবে =====
+  if (me.role !== "partner" && me.role !== "admin") {
+    document.getElementById("app").innerHTML = `
+      <div class="page">
+        <div class="loader-box" style="padding-top:80px;">
+          <div class="logo-circle">👑</div>
+          <h1>পার্টনার এক্সেস</h1>
+          <p class="error" style="margin-top:12px;line-height:1.6;">
+            এই পেজ শুধুমাত্র পার্টনার ও অ্যাডমিনদের জন্য।
+          </p>
+          <button class="btn" style="margin-top:20px;" onclick="location.href='index.html'">
+            হোমে ফিরে যান
+          </button>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
   const q = query(collection(db, "users"), where("role", "==", "partner"));
   const snap = await getDocs(q);
 
@@ -51,7 +70,6 @@ async function loadPartners() {
 
   const totalReferralEarnings = partners.reduce((s, p) => s + p.referralIncome, 0);
 
-  // Monthly pool from settings (manual for now)
   let pool = 0;
   try {
     const sSnap = await getDoc(doc(db, "system_settings", "main"));
@@ -158,15 +176,9 @@ async function loadPartners() {
           • যার রেফাররা যত বেশি আয় করবে, সে তত বেশি পাবে<br>
           • পার্টনার রেফার বোনাস: ১০% (সাধারণ ৫%)<br>
           • লভ্যাংশ মাসে একবার বিতরণ<br>
-          • পুল অ্যাডমিন সেট করেন (আপাতত)
+          • পুল অ্যাডমিন সেট করেন
         </p>
       </div>
-
-      ${me.role !== "partner" && me.role !== "admin" ? `
-        <div class="card" style="text-align:center;">
-          <p style="font-size:13px;color:var(--muted);">পার্টনার হতে অ্যাডমিনের সাথে যোগাযোগ করুন</p>
-        </div>
-      ` : ""}
     </div>
   `;
 }
