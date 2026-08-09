@@ -6,18 +6,14 @@ import {
   getDocs,
   updateDoc,
   deleteDoc,
-  increment,
-  serverTimestamp
+  increment
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const tg = window.Telegram?.WebApp;
 
 if (!tg || !tg.initDataUnsafe?.user) {
   document.getElementById("app").innerHTML = `
-    <div class="loader-box">
-      <h1>⛔ অ্যাক্সেস ডিনাইড</h1>
-      <p>Telegram থেকে খুলুন</p>
-    </div>
+    <div class="loader-box"><h1>⛔ অ্যাক্সেস ডিনাইড</h1></div>
   `;
   throw new Error("Telegram Required");
 }
@@ -28,7 +24,6 @@ tg.setHeaderColor("#0B1220");
 tg.setBackgroundColor("#0B1220");
 
 const adminUser = tg.initDataUnsafe.user;
-let allUsers = [];
 
 async function checkAdmin() {
   const snap = await getDoc(doc(db, "users", String(adminUser.id)));
@@ -48,86 +43,51 @@ async function loadUsers() {
   await checkAdmin();
 
   const snap = await getDocs(collection(db, "users"));
-  allUsers = [];
-  snap.forEach(d => {
-    allUsers.push({ id: d.id, ...d.data() });
-  });
-
-  // Highest coin first
-  allUsers.sort((a, b) => (b.coin || 0) - (a.coin || 0));
-
-  renderUsers(allUsers);
-}
-
-function renderUsers(list) {
-  let active = 0, inactive = 0, banned = 0;
-
-  list.forEach(u => {
-    if (u.isBanned) banned++;
-    else if (u.status === "Active") active++;
-    else inactive++;
-  });
+  const users = [];
+  snap.forEach(d => users.push({ id: d.id, ...d.data() }));
+  users.sort((a, b) => Number(b.coin || 0) - Number(a.coin || 0));
 
   let html = "";
+  users.forEach(u => {
+    const roleBadge = u.role === "admin"
+      ? `<span class="badge badge-active">Admin</span>`
+      : u.role === "partner"
+        ? `<span class="badge badge-pending">Partner</span>`
+        : `<span class="badge">User</span>`;
 
-  list.forEach(u => {
-    let badge = "";
-    if (u.isBanned) {
-      badge = `<span class="badge badge-rejected">Banned</span>`;
-    } else if (u.status === "Active") {
-      badge = `<span class="badge badge-active">Active</span>`;
-    } else {
-      badge = `<span class="badge badge-pending">Inactive</span>`;
-    }
+    const statusBadge = u.isBanned
+      ? `<span class="badge badge-rejected">Banned</span>`
+      : u.status === "Active"
+        ? `<span class="badge badge-active">Active</span>`
+        : `<span class="badge badge-pending">Inactive</span>`;
 
     html += `
-      <div class="item-card" id="user-${u.id}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;">
+      <div class="item-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
           <div>
-            <div style="font-weight:700;font-size:15px;margin-bottom:3px;">
-              👤 ${u.firstName || "User"} ${u.lastName || ""}
-            </div>
-            <div style="font-size:12px;color:var(--muted);">
-              @${u.username || "—"} • ID: ${u.telegramId}
-            </div>
+            <div style="font-weight:700;">👤 ${u.firstName || "User"}</div>
+            <div style="font-size:12px;color:var(--muted);">@${u.username || "—"} • ${u.telegramId || u.id}</div>
           </div>
-          ${badge}
+          <div style="text-align:right;">\( {roleBadge}<br> \){statusBadge}</div>
         </div>
-
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px;margin-bottom:12px;">
-          <div>💰 কয়েন: <b>${Number(u.coin || 0).toLocaleString()}</b></div>
-          <div>📈 আয়: <b>${Number(u.totalEarned || 0).toLocaleString()}</b></div>
-          <div>👥 একটিভ রেফ: <b>${u.activeReferrals || 0}</b></div>
-          <div>🔗 মোট রেফ: <b>${u.referrals || 0}</b></div>
+        <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:10px;">
+          💰 ${Number(u.coin || 0).toLocaleString()} কয়েন<br>
+          👥 রেফার: ${u.referrals || 0} (Active: ${u.activeReferrals || 0})<br>
+          📍 ${u.country || "Unknown"}
+          \( {u.facebookLink ? `<br>📘 <a href=" \){u.facebookLink}" target="_blank" style="color:var(--green);">Facebook</a>` : ""}
         </div>
-
-        ${u.facebookLink ? `
-          <div style="font-size:12px;margin-bottom:8px;">
-            <a href="${u.facebookLink}" target="_blank" style="color:var(--green);text-decoration:none;">
-              📘 Facebook Profile
-            </a>
-          </div>
-        ` : ""}
-
-        ${u.paymentMethod ? `
-          <div style="font-size:12px;color:var(--muted);margin-bottom:10px;">
-            💳 ${u.paymentMethod}: ${u.paymentNumber || "—"}
-          </div>
-        ` : ""}
-
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <button class="btn-secondary" style="padding:10px;font-size:12px;" onclick="window.addCoin('${u.id}')">
-            + কয়েন অ্যাড
-          </button>
-          <button class="btn-secondary" style="padding:10px;font-size:12px;" onclick="window.removeCoin('${u.id}')">
-            − কয়েন রিমুভ
-          </button>
-          <button class="btn-secondary" style="padding:10px;font-size:12px;" onclick="window.toggleBan('${u.id}', ${!!u.isBanned})">
-            ${u.isBanned ? "আনব্যান" : "ব্যান"}
-          </button>
-          <button class="btn-danger" style="padding:10px;font-size:12px;" onclick="window.deleteUser('${u.id}')">
-            ডিলিট
-          </button>
+          <button class="btn-secondary" style="padding:10px;font-size:12px;" onclick="window.addCoin('${u.id}')">+ কয়েন</button>
+          ${u.role === "partner"
+            ? `<button class="btn-secondary" style="padding:10px;font-size:12px;" onclick="window.removePartner('${u.id}')">Partner সরান</button>`
+            : u.role !== "admin"
+              ? `<button class="btn-primary" style="padding:10px;font-size:12px;" onclick="window.makePartner('${u.id}')">👑 Partner</button>`
+              : `<button class="btn-secondary" style="padding:10px;font-size:12px;" disabled>Admin</button>`
+          }
+          ${!u.isBanned
+            ? `<button class="btn-danger" style="padding:10px;font-size:12px;grid-column:span 2;" onclick="window.banUser('${u.id}')">🚫 ব্যান</button>`
+            : `<button class="btn-secondary" style="padding:10px;font-size:12px;grid-column:span 2;" onclick="window.unbanUser('${u.id}')">আনব্যান</button>`
+          }
         </div>
       </div>
     `;
@@ -136,127 +96,98 @@ function renderUsers(list) {
   document.getElementById("app").innerHTML = `
     <div class="admin-page">
       <div class="admin-header">
-        <h1>👥 ইউজার ম্যানেজমেন্ট</h1>
-        <p>মোট ${list.length} জন ইউজার</p>
+        <h1>👥 ইউজারস</h1>
+        <p>মোট ${users.length} জন</p>
       </div>
-
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-label">Active</div>
-          <div class="stat-value green">${active}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Inactive</div>
-          <div class="stat-value yellow">${inactive}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Banned</div>
-          <div class="stat-value red">${banned}</div>
-        </div>
+      <div class="section-card">
+        <input id="searchUser" placeholder="সার্চ: নাম / ID / username" oninput="window.filterUsers()">
       </div>
-
-      <div style="margin-bottom:14px;">
-        <input id="searchInput" placeholder="Telegram ID বা Username দিয়ে সার্চ..." style="margin:0;">
-      </div>
-
-      <div id="usersList">
-        ${html || `<div class="section-card" style="text-align:center;color:var(--muted);">কোনো ইউজার পাওয়া যায়নি</div>`}
-      </div>
-
+      <div id="usersList">${html || `<div class="section-card">কোনো ইউজার নেই</div>`}</div>
       <div style="margin-top:18px;">
-        <a href="index.html" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;">
-          ← ড্যাশবোর্ডে ফিরে যান
-        </a>
+        <a href="index.html" class="btn-secondary" style="display:block;text-align:center;text-decoration:none;">← ড্যাশবোর্ড</a>
       </div>
     </div>
   `;
 
-  document.getElementById("searchInput").oninput = (e) => {
-    const q = e.target.value.trim().toLowerCase();
-    if (!q) {
-      renderUsers(allUsers);
-      return;
-    }
-    const filtered = allUsers.filter(u =>
-      String(u.telegramId).includes(q) ||
-      (u.username || "").toLowerCase().includes(q) ||
-      (u.firstName || "").toLowerCase().includes(q)
-    );
-    renderUsers(filtered);
-  };
+  window._allUsersHtml = html;
 }
 
-// ===== Actions =====
-window.addCoin = async function(uid) {
-  const amount = prompt("কত কয়েন অ্যাড করবেন?");
-  if (!amount || isNaN(amount) || Number(amount) <= 0) return;
+window.filterUsers = function() {
+  const q = (document.getElementById("searchUser")?.value || "").toLowerCase();
+  const cards = document.querySelectorAll("#usersList .item-card");
+  cards.forEach(card => {
+    card.style.display = card.innerText.toLowerCase().includes(q) ? "block" : "none";
+  });
+};
 
+window.makePartner = async function(uid) {
+  if (!confirm("এই ইউজারকে Partner বানাবেন?\n(অ্যাডমিন এক্সেস পাবে না)")) return;
+  try {
+    await updateDoc(doc(db, "users", uid), { role: "partner" });
+    tg.showAlert("👑 Partner বানানো হয়েছে");
+    loadUsers();
+  } catch (e) {
+    tg.showAlert(e.message);
+  }
+};
+
+window.removePartner = async function(uid) {
+  if (!confirm("Partner রোল সরাবেন?")) return;
+  try {
+    await updateDoc(doc(db, "users", uid), { role: "user" });
+    tg.showAlert("Partner সরানো হয়েছে");
+    loadUsers();
+  } catch (e) {
+    tg.showAlert(e.message);
+  }
+};
+
+window.addCoin = async function(uid) {
+  const amount = prompt("কত কয়েন যোগ করবেন?");
+  if (!amount || isNaN(amount) || Number(amount) <= 0) return;
   try {
     await updateDoc(doc(db, "users", uid), {
       coin: increment(Number(amount)),
       totalEarned: increment(Number(amount))
     });
-    tg.showAlert("+" + amount + " কয়েন অ্যাড হয়েছে");
+    tg.showAlert("কয়েন যোগ হয়েছে");
     loadUsers();
   } catch (e) {
-    tg.showAlert("সমস্যা: " + e.message);
+    tg.showAlert(e.message);
   }
 };
 
-window.removeCoin = async function(uid) {
-  const amount = prompt("কত কয়েন রিমুভ করবেন?");
-  if (!amount || isNaN(amount) || Number(amount) <= 0) return;
-
+window.banUser = async function(uid) {
+  if (!confirm("ব্যান করবেন?")) return;
   try {
+    const snap = await getDoc(doc(db, "users", uid));
+    const data = snap.data() || {};
     await updateDoc(doc(db, "users", uid), {
-      coin: increment(-Number(amount))
+      isBanned: true,
+      status: "Banned",
+      banDeviceHash: data.deviceHash || ""
     });
-    tg.showAlert("-" + amount + " কয়েন রিমুভ হয়েছে");
+    tg.showAlert("ব্যান হয়েছে");
     loadUsers();
   } catch (e) {
-    tg.showAlert("সমস্যা: " + e.message);
+    tg.showAlert(e.message);
   }
 };
 
-window.toggleBan = async function(uid, currentlyBanned) {
-  const action = currentlyBanned ? "আনব্যান" : "ব্যান";
-  if (!confirm("আপনি কি এই ইউজারকে " + action + " করতে চান?")) return;
-
+window.unbanUser = async function(uid) {
+  if (!confirm("আনব্যান?")) return;
   try {
-    const userRef = doc(db, "users", uid);
-    const snap = await getDoc(userRef);
-    const data = snap.data();
-
-    if (currentlyBanned) {
-      await updateDoc(userRef, {
-        isBanned: false,
-        status: data.facebookLink ? "Active" : "Inactive"
-      });
-      tg.showAlert("ইউজার আনব্যান হয়েছে");
-    } else {
-      await updateDoc(userRef, {
-        isBanned: true,
-        status: "Banned",
-        banDeviceHash: data.deviceHash || ""
-      });
-      tg.showAlert("ইউজার ব্যান হয়েছে");
-    }
+    const snap = await getDoc(doc(db, "users", uid));
+    const data = snap.data() || {};
+    await updateDoc(doc(db, "users", uid), {
+      isBanned: false,
+      status: data.facebookLink ? "Active" : "Inactive",
+      banDeviceHash: ""
+    });
+    tg.showAlert("আনব্যান হয়েছে");
     loadUsers();
   } catch (e) {
-    tg.showAlert("সমস্যা: " + e.message);
-  }
-};
-
-window.deleteUser = async function(uid) {
-  if (!confirm("এই ইউজারকে পার্মানেন্টলি ডিলিট করবেন?\nএটি আর ফেরত আনা যাবে না।")) return;
-  if (!confirm("শেষবার নিশ্চিত করুন — ডিলিট করবেন?")) return;
-
-  try {
-    await deleteDoc(doc(db, "users", uid));
-    tg.showAlert("ইউজার ডিলিট হয়েছে");
-    loadUsers();
-  } catch (e) {
-    tg.showAlert("সমস্যা: " + e.message);
+    tg.showAlert(e.message);
   }
 };
 
