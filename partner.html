@@ -8,65 +8,85 @@
   <link rel="stylesheet" href="css/style.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
+    .page-partner {
+      padding: 16px 14px 100px;
+      max-width: 100%;
+      overflow-x: hidden;
+      box-sizing: border-box;
+    }
     .partner-header {
       background: linear-gradient(135deg, #1a1408 0%, #0B1220 50%, #1a1008 100%);
       border: 1px solid rgba(255, 200, 80, 0.35);
-      border-radius: 20px;
-      padding: 20px;
+      border-radius: 18px;
+      padding: 18px 14px;
       text-align: center;
-      margin-bottom: 16px;
-      box-shadow: 0 0 40px rgba(255, 180, 40, 0.12);
+      margin-bottom: 14px;
+      box-shadow: 0 0 30px rgba(255, 180, 40, 0.1);
+      box-sizing: border-box;
     }
     .partner-header h1 {
-      font-size: 22px;
+      font-size: 20px;
       font-weight: 800;
-      background: linear-gradient(90deg, #f5d76e, #f0a500);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      margin-bottom: 8px;
+      color: #f5d76e;
+      margin: 0 0 6px;
     }
     .pool-value {
-      font-size: 28px;
+      font-size: 26px;
       font-weight: 800;
       color: #f5d76e;
     }
     .podium {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      display: flex;
       gap: 8px;
       margin-bottom: 16px;
+      width: 100%;
+      box-sizing: border-box;
     }
     .podium-card {
+      flex: 1;
+      min-width: 0;
       background: rgba(255,255,255,0.04);
-      border-radius: 16px;
-      padding: 14px 8px;
+      border-radius: 14px;
+      padding: 12px 6px;
       text-align: center;
       border: 1px solid rgba(255,255,255,0.08);
+      box-sizing: border-box;
     }
-    .podium-card.gold { border-color: rgba(255,200,50,0.5); box-shadow: 0 0 20px rgba(255,180,40,0.15); }
+    .podium-card.gold { border-color: rgba(255,200,50,0.5); }
     .podium-card.silver { border-color: rgba(200,200,220,0.4); }
     .podium-card.bronze { border-color: rgba(205,127,50,0.45); }
-    .podium-rank { font-size: 22px; margin-bottom: 4px; }
-    .podium-name { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
-    .podium-earn { font-size: 11px; color: #f5d76e; }
+    .podium-rank { font-size: 20px; margin-bottom: 4px; }
+    .podium-name {
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .podium-earn { font-size: 10px; color: #f5d76e; }
     .partner-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 10px;
+      width: 100%;
+      box-sizing: border-box;
     }
     .partner-card {
       background: rgba(255,255,255,0.04);
       border: 1px solid rgba(255,200,80,0.15);
-      border-radius: 16px;
-      padding: 14px;
+      border-radius: 14px;
+      padding: 12px;
+      box-sizing: border-box;
+      min-width: 0;
     }
     .partner-card.me {
       border-color: rgba(255,200,80,0.55);
-      box-shadow: 0 0 24px rgba(255,180,40,0.18);
+      box-shadow: 0 0 20px rgba(255,180,40,0.15);
       grid-column: 1 / -1;
     }
     .pc-rank { font-size: 11px; color: #f5d76e; font-weight: 700; }
-    .pc-name { font-weight: 700; font-size: 14px; margin: 4px 0; }
+    .pc-name { font-weight: 700; font-size: 13px; margin: 4px 0; word-break: break-word; }
     .pc-stat { font-size: 11px; color: var(--muted); line-height: 1.6; }
   </style>
 </head>
@@ -89,4 +109,4 @@
 
   <script type="module" src="js/partner.js"></script>
 </body>
-  </html>
+</html>
