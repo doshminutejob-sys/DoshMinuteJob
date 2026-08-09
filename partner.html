@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0B1220">
+  <title>পার্টনার লিস্ট • দশ মিনিটের জব</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    .partner-header {
+      background: linear-gradient(135deg, #1a1408 0%, #0B1220 50%, #1a1008 100%);
+      border: 1px solid rgba(255, 200, 80, 0.35);
+      border-radius: 20px;
+      padding: 20px;
+      text-align: center;
+      margin-bottom: 16px;
+      box-shadow: 0 0 40px rgba(255, 180, 40, 0.12);
+    }
+    .partner-header h1 {
+      font-size: 22px;
+      font-weight: 800;
+      background: linear-gradient(90deg, #f5d76e, #f0a500);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .pool-value {
+      font-size: 28px;
+      font-weight: 800;
+      color: #f5d76e;
+    }
+    .podium {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .podium-card {
+      background: rgba(255,255,255,0.04);
+      border-radius: 16px;
+      padding: 14px 8px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .podium-card.gold { border-color: rgba(255,200,50,0.5); box-shadow: 0 0 20px rgba(255,180,40,0.15); }
+    .podium-card.silver { border-color: rgba(200,200,220,0.4); }
+    .podium-card.bronze { border-color: rgba(205,127,50,0.45); }
+    .podium-rank { font-size: 22px; margin-bottom: 4px; }
+    .podium-name { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
+    .podium-earn { font-size: 11px; color: #f5d76e; }
+    .partner-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .partner-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,200,80,0.15);
+      border-radius: 16px;
+      padding: 14px;
+    }
+    .partner-card.me {
+      border-color: rgba(255,200,80,0.55);
+      box-shadow: 0 0 24px rgba(255,180,40,0.18);
+      grid-column: 1 / -1;
+    }
+    .pc-rank { font-size: 11px; color: #f5d76e; font-weight: 700; }
+    .pc-name { font-weight: 700; font-size: 14px; margin: 4px 0; }
+    .pc-stat { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div id="app" class="loading-screen">
+    <div class="loader-box">
+      <div class="logo-circle">👑</div>
+      <h1>পার্টনার</h1>
+      <p>লোড হচ্ছে...</p>
+    </div>
+  </div>
+
+  <nav class="bottom-nav">
+    <a href="index.html" class="nav-item"><span class="icon">🏠</span><span class="label">হোম</span></a>
+    <a href="tasks.html" class="nav-item"><span class="icon">📋</span><span class="label">টাস্ক</span></a>
+    <a href="refer.html" class="nav-item"><span class="icon">👥</span><span class="label">রেফার</span></a>
+    <a href="partner.html" class="nav-item active"><span class="icon">👑</span><span class="label">পার্টনার</span></a>
+    <a href="profile.html" class="nav-item"><span class="icon">👤</span><span class="label">প্রোফাইল</span></a>
+  </nav>
+
+  <script type="module" src="js/partner.js"></script>
+</body>
+  </html>
