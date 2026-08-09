@@ -35,14 +35,12 @@ const user = tg.initDataUnsafe.user;
 
 function getStartParam() {
   let param = tg.initDataUnsafe?.start_param || null;
-
   if (!param) {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start") || null;
     } catch (e) {}
   }
-
   if (!param && window.location.hash) {
     try {
       const hashText = window.location.hash.substring(1);
@@ -53,7 +51,6 @@ function getStartParam() {
       }
     } catch (e) {}
   }
-
   return param ? String(param).trim() : null;
 }
 
@@ -67,7 +64,6 @@ function generateDeviceHash() {
     navigator.platform,
     navigator.hardwareConcurrency || "0"
   ].join("|");
-
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     hash = ((hash << 5) - hash) + str.charCodeAt(i);
@@ -82,31 +78,19 @@ async function detectLocation() {
     if (res.ok) {
       const data = await res.json();
       if (data.ip && data.country_name) {
-        return {
-          ip: data.ip,
-          country: data.country_name,
-          countryCode: data.country_code || "",
-          city: data.city || ""
-        };
+        return { ip: data.ip, country: data.country_name, countryCode: data.country_code || "", city: data.city || "" };
       }
     }
   } catch (e) {}
-
   try {
     const res = await fetch("https://ipwho.is/", { cache: "no-store" });
     if (res.ok) {
       const data = await res.json();
       if (data.success && data.ip) {
-        return {
-          ip: data.ip,
-          country: data.country || "Unknown",
-          countryCode: data.country_code || "",
-          city: data.city || ""
-        };
+        return { ip: data.ip, country: data.country || "Unknown", countryCode: data.country_code || "", city: data.city || "" };
       }
     }
   } catch (e) {}
-
   return null;
 }
 
@@ -114,21 +98,12 @@ function checkVpnSuspicion(ipHistory, newIP, newCountry) {
   const now = Date.now();
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const recent = (ipHistory || []).filter(item => now - item.time < sevenDays);
-
   const uniqueCountries = new Set(recent.map(i => i.country).filter(Boolean));
-  if (newCountry && newCountry !== "Unknown") {
-    uniqueCountries.add(newCountry);
-  }
-
+  if (newCountry && newCountry !== "Unknown") uniqueCountries.add(newCountry);
   let vpnScore = 0;
   if (uniqueCountries.size >= 3) vpnScore = 100;
   else if (uniqueCountries.size >= 2) vpnScore = 60;
-
-  return {
-    vpnScore,
-    vpnSuspected: vpnScore >= 60,
-    recentHistory: recent
-  };
+  return { vpnScore, vpnSuspected: vpnScore >= 60, recentHistory: recent };
 }
 
 async function ensureSettings() {
@@ -140,7 +115,9 @@ async function ensureSettings() {
       minWithdraw: 1000,
       requiredActiveReferrals: 15,
       referralBonusPercent: 5,
+      partnerReferralPercent: 10,
       activeReferralReward: 250,
+      partnerPool: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -149,12 +126,8 @@ async function ensureSettings() {
 
 async function createReferralRecord(newUserId) {
   if (!startParam || startParam === String(newUserId)) return;
-
   try {
-    const q = query(
-      collection(db, "referral_history"),
-      where("newUserId", "==", String(newUserId))
-    );
+    const q = query(collection(db, "referral_history"), where("newUserId", "==", String(newUserId)));
     const existing = await getDocs(q);
     if (!existing.empty) return;
 
@@ -166,11 +139,8 @@ async function createReferralRecord(newUserId) {
     });
 
     const referrerRef = doc(db, "users", String(startParam));
-    const referrerSnap = await getDoc(referrerRef);
-    if (referrerSnap.exists()) {
-      await updateDoc(referrerRef, {
-        referrals: increment(1)
-      });
+    if ((await getDoc(referrerRef)).exists()) {
+      await updateDoc(referrerRef, { referrals: increment(1) });
     }
   } catch (e) {
     console.error("Referral error:", e);
@@ -184,12 +154,8 @@ async function createOrUpdateUser() {
   const location = await detectLocation();
 
   if (!snap.exists()) {
-    const deviceQuery = query(
-      collection(db, "users"),
-      where("deviceHash", "==", deviceHash)
-    );
+    const deviceQuery = query(collection(db, "users"), where("deviceHash", "==", deviceHash));
     const deviceSnap = await getDocs(deviceQuery);
-
     if (!deviceSnap.empty) {
       document.getElementById("app").innerHTML = `
         <div class="loader-box">
@@ -203,13 +169,7 @@ async function createOrUpdateUser() {
   }
 
   if (!snap.exists()) {
-    const ipHistory = location ? [{
-      ip: location.ip,
-      country: location.country,
-      countryCode: location.countryCode,
-      time: Date.now()
-    }] : [];
-
+    const ipHistory = location ? [{ ip: location.ip, country: location.country, countryCode: location.countryCode, time: Date.now() }] : [];
     await setDoc(userRef, {
       telegramId: user.id,
       username: user.username || "",
@@ -227,26 +187,21 @@ async function createOrUpdateUser() {
       referralIncome: 0,
       paymentMethod: "",
       paymentNumber: "",
-      deviceHash: deviceHash,
+      deviceHash,
       isBanned: false,
       referredBy: (startParam && startParam !== String(user.id)) ? String(startParam) : "",
       country: location ? location.country : "Unknown",
       countryCode: location ? location.countryCode : "",
       lastIP: location ? location.ip : "",
-      ipHistory: ipHistory,
+      ipHistory,
       vpnSuspected: false,
       vpnScore: 0,
       createdAt: serverTimestamp(),
       lastActiveAt: serverTimestamp()
     });
-
-    if (startParam) {
-      await createReferralRecord(user.id);
-    }
-
+    if (startParam) await createReferralRecord(user.id);
   } else {
     const data = snap.data();
-
     if (data.isBanned) {
       document.getElementById("app").innerHTML = `
         <div class="loader-box">
@@ -260,7 +215,7 @@ async function createOrUpdateUser() {
 
     let updateData = {
       lastActiveAt: serverTimestamp(),
-      deviceHash: deviceHash,
+      deviceHash,
       username: user.username || data.username || "",
       firstName: user.first_name || data.firstName || "",
       photoUrl: user.photo_url || data.photoUrl || ""
@@ -274,18 +229,11 @@ async function createOrUpdateUser() {
     if (location && location.ip) {
       const oldHistory = data.ipHistory || [];
       const result = checkVpnSuspicion(oldHistory, location.ip, location.country);
-
       let newHistory = [...result.recentHistory];
       if (data.lastIP !== location.ip) {
-        newHistory.push({
-          ip: location.ip,
-          country: location.country,
-          countryCode: location.countryCode,
-          time: Date.now()
-        });
+        newHistory.push({ ip: location.ip, country: location.country, countryCode: location.countryCode, time: Date.now() });
       }
       if (newHistory.length > 8) newHistory = newHistory.slice(-8);
-
       updateData.country = location.country;
       updateData.countryCode = location.countryCode;
       updateData.lastIP = location.ip;
@@ -293,16 +241,13 @@ async function createOrUpdateUser() {
       updateData.vpnScore = Math.max(data.vpnScore || 0, result.vpnScore);
       updateData.vpnSuspected = data.vpnSuspected || result.vpnSuspected;
     }
-
     await updateDoc(userRef, updateData);
   }
 }
 
 async function loadHome() {
-  const userRef = doc(db, "users", String(user.id));
-  const snap = await getDoc(userRef);
+  const snap = await getDoc(doc(db, "users", String(user.id)));
   if (!snap.exists()) return;
-
   const data = snap.data();
 
   const statusText = data.status === "Active" ? "Active" : "Inactive";
@@ -326,6 +271,16 @@ async function loadHome() {
       <div class="card">
         <div class="card-title">🛠 অ্যাডমিন প্যানেল</div>
         <button class="btn" onclick="location.href='admin/index.html'">ড্যাশবোর্ড খুলুন</button>
+      </div>
+    `;
+  }
+
+  let partnerCard = "";
+  if (data.role === "partner" || data.role === "admin") {
+    partnerCard = `
+      <div class="card">
+        <div class="card-title">👑 পার্টনার জোন</div>
+        <button class="btn" onclick="location.href='partner.html'">পার্টনার লিস্ট দেখুন</button>
       </div>
     `;
   }
@@ -375,23 +330,20 @@ async function loadHome() {
       </div>
 
       ${activationCard}
+      ${partnerCard}
       ${adminCard}
 
       <div class="card" style="text-align:center;">
         <div class="card-title">📢 অফিসিয়াল চ্যানেল</div>
-        <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">
-          আপডেট ও নোটিফিকেশন পেতে চ্যানেলে জয়েন করুন
-        </p>
-        <a href="https://t.me/Dosh_Minute_Job_Official" target="_blank" class="btn" style="display:block;text-decoration:none;">
-          চ্যানেলে জয়েন করুন
-        </a>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">আপডেট ও নোটিফিকেশন পেতে চ্যানেলে জয়েন করুন</p>
+        <a href="https://t.me/Dosh_Minute_Job_Official" target="_blank" class="btn" style="display:block;text-decoration:none;">চ্যানেলে জয়েন করুন</a>
       </div>
 
       <div class="quick-grid">
         <a href="tasks.html" class="quick-btn">📋<br>টাস্ক</a>
+        <a href="earn.html" class="quick-btn">💰<br>Earn</a>
         <a href="refer.html" class="quick-btn">👥<br>রেফার</a>
-        <a href="withdraw.html" class="quick-btn">💰<br>উইথড্র</a>
-        <a href="notifications.html" class="quick-btn">🔔<br>নোটিশ</a>
+        <a href="withdraw.html" class="quick-btn">💸<br>উইথড্র</a>
       </div>
     </div>
   `;
