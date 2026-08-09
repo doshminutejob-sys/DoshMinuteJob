@@ -488,20 +488,29 @@ async function giveReferralBonus(earnedCoin) {
   if (snap.empty) return;
 
   const settingsSnap = await getDoc(doc(db, "system_settings", "main"));
-  const percent = settingsSnap.exists() ? (settingsSnap.data().referralBonusPercent || 5) : 5;
-  const bonus = Math.floor(earnedCoin * (percent / 100));
-  if (bonus <= 0) return;
+  const settings = settingsSnap.exists() ? settingsSnap.data() : {};
+  const normalPercent = settings.referralBonusPercent || 5;
+  const partnerPercent = settings.partnerReferralPercent || 10;
 
   for (const d of snap.docs) {
     const ref = d.data();
     const referrerRef = doc(db, "users", ref.referrerId);
-    if ((await getDoc(referrerRef)).exists()) {
-      await updateDoc(referrerRef, {
-        coin: increment(bonus),
-        totalEarned: increment(bonus),
-        referralIncome: increment(bonus)
-      });
-    }
+    const referrerSnap = await getDoc(referrerRef);
+    if (!referrerSnap.exists()) continue;
+
+    const referrer = referrerSnap.data();
+    const percent = (referrer.role === "partner" || referrer.role === "admin")
+      ? partnerPercent
+      : normalPercent;
+
+    const bonus = Math.floor(earnedCoin * (percent / 100));
+    if (bonus <= 0) continue;
+
+    await updateDoc(referrerRef, {
+      coin: increment(bonus),
+      totalEarned: increment(bonus),
+      referralIncome: increment(bonus)
+    });
   }
 }
 
@@ -520,4 +529,4 @@ async function giveReferralBonus(earnedCoin) {
     </div>
   `;
 });
-                                
+      
