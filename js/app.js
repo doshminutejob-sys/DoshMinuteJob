@@ -9,7 +9,8 @@ import {
   addDoc,
   query,
   where,
-  getDocs
+  getDocs,
+  increment
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const tg = window.Telegram?.WebApp;
@@ -32,24 +33,24 @@ tg.setBackgroundColor("#0B1220");
 
 const user = tg.initDataUnsafe.user;
 
-// ===== Get start_param (Referral) =====
 function getStartParam() {
-  // Official way
   let param = tg.initDataUnsafe?.start_param || null;
 
-  // Fallback from URL
   if (!param) {
     try {
       const urlParams = new URLSearchParams(window.location.search);
-      param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || null;
+      param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || urlParams.get("start") || null;
     } catch (e) {}
   }
 
-  // Another fallback
   if (!param && window.location.hash) {
     try {
-      const hashParams = new URLSearchParams(window.location.hash.replace("#", ""));
-      param = hashParams.get("tgWebAppStartParam") || null;
+      const hashText = window.location.hash.substring(1);
+      const urlParams = new URLSearchParams(hashText);
+      param = urlParams.get("tgWebAppStartParam") || urlParams.get("startapp") || null;
+      if (!param && hashText.includes("tgWebAppStartParam=")) {
+        param = hashText.split("tgWebAppStartParam=")[1]?.split("&")[0];
+      }
     } catch (e) {}
   }
 
@@ -57,7 +58,6 @@ function getStartParam() {
 }
 
 const startParam = getStartParam();
-console.log("Referral start_param:", startParam);
 
 function generateDeviceHash() {
   const str = [
@@ -115,30 +115,18 @@ function checkVpnSuspicion(ipHistory, newIP, newCountry) {
   const sevenDays = 7 * 24 * 60 * 60 * 1000;
   const recent = (ipHistory || []).filter(item => now - item.time < sevenDays);
 
-  // শুধু দেশগুলো দেখব
   const uniqueCountries = new Set(recent.map(i => i.country).filter(Boolean));
   if (newCountry && newCountry !== "Unknown") {
     uniqueCountries.add(newCountry);
   }
 
   let vpnScore = 0;
-  let vpnSuspected = false;
-
-  // ২টা বা তার বেশি আলাদা দেশ → সন্দেহ
-  if (uniqueCountries.size >= 2) {
-    vpnScore = 60;
-    vpnSuspected = true;
-  }
-
-  // ৩টা বা তার বেশি দেশ → আরও কঠোর
-  if (uniqueCountries.size >= 3) {
-    vpnScore = 100;
-    vpnSuspected = true;
-  }
+  if (uniqueCountries.size >= 3) vpnScore = 100;
+  else if (uniqueCountries.size >= 2) vpnScore = 60;
 
   return {
-    vpnScore: Math.min(vpnScore, 100),
-    vpnSuspected,
+    vpnScore,
+    vpnSuspected: vpnScore >= 60,
     recentHistory: recent
   };
 }
@@ -160,22 +148,15 @@ async function ensureSettings() {
 }
 
 async function createReferralRecord(newUserId) {
-  if (!startParam || startParam === String(newUserId)) {
-    console.log("No valid startParam for referral");
-    return;
-  }
+  if (!startParam || startParam === String(newUserId)) return;
 
   try {
-    // Already has referral?
     const q = query(
       collection(db, "referral_history"),
       where("newUserId", "==", String(newUserId))
     );
     const existing = await getDocs(q);
-    if (!existing.empty) {
-      console.log("Referral already exists");
-      return;
-    }
+    if (!existing.empty) return;
 
     await addDoc(collection(db, "referral_history"), {
       referrerId: String(startParam),
@@ -184,9 +165,15 @@ async function createReferralRecord(newUserId) {
       createdAt: serverTimestamp()
     });
 
-    console.log("SUCCESS: Referral created →", startParam, "to", newUserId);
+    const referrerRef = doc(db, "users", String(startParam));
+    const referrerSnap = await getDoc(referrerRef);
+    if (referrerSnap.exists()) {
+      await updateDoc(referrerRef, {
+        referrals: increment(1)
+      });
+    }
   } catch (e) {
-    console.error("Referral create failed:", e);
+    console.error("Referral error:", e);
   }
 }
 
@@ -196,7 +183,6 @@ async function createOrUpdateUser() {
   const deviceHash = generateDeviceHash();
   const location = await detectLocation();
 
-  // ===== MULTI ACCOUNT BLOCK =====
   if (!snap.exists()) {
     const deviceQuery = query(
       collection(db, "users"),
@@ -217,7 +203,6 @@ async function createOrUpdateUser() {
   }
 
   if (!snap.exists()) {
-    // ========== NEW USER ==========
     const ipHistory = location ? [{
       ip: location.ip,
       country: location.country,
@@ -244,7 +229,7 @@ async function createOrUpdateUser() {
       paymentNumber: "",
       deviceHash: deviceHash,
       isBanned: false,
-      referredBy: startParam || "",
+      referredBy: (startParam && startParam !== String(user.id)) ? String(startParam) : "",
       country: location ? location.country : "Unknown",
       countryCode: location ? location.countryCode : "",
       lastIP: location ? location.ip : "",
@@ -255,11 +240,11 @@ async function createOrUpdateUser() {
       lastActiveAt: serverTimestamp()
     });
 
-    // Create referral
-    await createReferralRecord(user.id);
+    if (startParam) {
+      await createReferralRecord(user.id);
+    }
 
   } else {
-    // ========== EXISTING USER ==========
     const data = snap.data();
 
     if (data.isBanned) {
@@ -281,9 +266,8 @@ async function createOrUpdateUser() {
       photoUrl: user.photo_url || data.photoUrl || ""
     };
 
-    // Late referral capture
     if (!data.referredBy && startParam && startParam !== String(user.id)) {
-      updateData.referredBy = startParam;
+      updateData.referredBy = String(startParam);
       await createReferralRecord(user.id);
     }
 
@@ -321,19 +305,9 @@ async function loadHome() {
 
   const data = snap.data();
 
-  let statusText = "Inactive";
-  let statusClass = "status-inactive";
-  if (data.status === "Active") {
-    statusText = "Active";
-    statusClass = "status-active";
-  }
-
+  const statusText = data.status === "Active" ? "Active" : "Inactive";
+  const statusClass = data.status === "Active" ? "status-active" : "status-inactive";
   const countryText = (data.country && data.country !== "Unknown") ? data.country : "অজানা";
-
-  // DEBUG (পরে সরিয়ে দিও)
-  const debugText = startParam 
-    ? `🔗 Ref Param: ${startParam}` 
-    : `🔗 No start_param`;
 
   let activationCard = "";
   if (data.status !== "Active") {
@@ -364,8 +338,7 @@ async function loadHome() {
           <div>
             <div class="hero-name">${data.firstName || "User"}</div>
             <div class="hero-username">@${data.username || "unknown"}</div>
-            <span class="status-badge ${statusClass}">${statusText}</span>
-            <div style="font-size:11px;color:#f59e0b;margin-top:4px;">${debugText}</div>
+            <span class="status-badge \( {statusClass}"> \){statusText}</span>
           </div>
         </div>
         <div class="balance-box">
@@ -452,4 +425,3 @@ async function loadHome() {
     }
   }
 })();
-          
