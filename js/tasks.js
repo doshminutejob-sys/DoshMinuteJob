@@ -529,4 +529,4 @@ async function giveReferralBonus(earnedCoin) {
     </div>
   `;
 });
-      
+          
